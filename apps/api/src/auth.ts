@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { ClientFacingError, redirect } from './http.js';
-import { isAccessTokenResponse } from './oauth-helpers.js';
+import { AuthenticationError, ClientFacingError, isAccessTokenResponse, redirect } from './http.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -106,9 +105,9 @@ async function fetchUserInfo(config: OidcAuthConfig, accessToken: string): Promi
   const response = await fetch(config.userInfoUrl, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new Error('OIDC userinfo rejected the access token');
+  if (!response.ok) throw new AuthenticationError('OIDC userinfo rejected the access token');
   const value: unknown = await response.json();
-  if (!isUserInfo(value)) throw new Error('OIDC userinfo response is missing sub');
+  if (!isUserInfo(value)) throw new AuthenticationError('OIDC userinfo response is missing sub');
   return { subject: value.sub, email: value.email, displayName: value.name };
 }
 
@@ -138,7 +137,9 @@ async function exchangeOidcCode(
     body,
   });
   const value: unknown = await response.json();
-  if (!response.ok || !isAccessTokenResponse(value)) throw new Error('OIDC code exchange failed');
+  if (!response.ok || !isAccessTokenResponse(value)) {
+    throw new ClientFacingError('OIDC code exchange failed');
+  }
   return value.access_token;
 }
 

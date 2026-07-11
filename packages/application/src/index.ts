@@ -98,23 +98,30 @@ export class CompanyBrainService {
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
     if (!token) throw new SourceNotLinkedError(sourceId);
-    const result = await plugin.getObject(objectId, {
-      identity,
-      accessToken: token,
-      requestId,
-      resultLimit: 1,
-    });
-    await this.audit.append({
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
-      requestId,
-      subject: identity.subject,
-      action: 'get-object',
-      sourceIds: [sourceId],
-      outcome: result ? 'success' : 'failure',
-      resultCount: result ? 1 : 0,
-    });
-    return result;
+    try {
+      const result = await plugin.getObject(objectId, {
+        identity,
+        accessToken: token,
+        requestId,
+      });
+      await this.audit.append({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        requestId,
+        subject: identity.subject,
+        action: 'get-object',
+        sourceIds: [sourceId],
+        outcome: result ? 'success' : 'failure',
+        resultCount: result ? 1 : 0,
+      });
+      return result;
+    } catch (error: unknown) {
+      if (error instanceof PluginRequestError) throw error;
+      if (error instanceof Error && /invalid .*object id/i.test(error.message)) {
+        throw new PluginRequestError(error.message, 'invalid-request');
+      }
+      throw error;
+    }
   }
 
   private selectPlugins(sourceIds?: readonly string[]): readonly KnowledgePlugin[] {
@@ -180,7 +187,7 @@ export class UnknownSourceError extends Error {}
 export class SourceNotLinkedError extends Error {}
 
 function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) return 20;
+  if (limit === undefined || !Number.isFinite(limit)) return 20;
   return Math.max(1, Math.min(100, Math.floor(limit)));
 }
 
@@ -192,8 +199,7 @@ function mapPluginError(sourceId: string, error: unknown): SourceFailure {
   if (error instanceof PluginRequestError) {
     return failure(sourceId, error.code, error.message);
   }
-  const message = error instanceof Error ? error.message : 'Source search failed';
-  return failure(sourceId, 'unavailable', message);
+  return failure(sourceId, 'unavailable', 'Source search failed');
 }
 
 function fingerprint(value: string): string {

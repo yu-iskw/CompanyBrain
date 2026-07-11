@@ -1,7 +1,12 @@
 import { PluginRequestError } from '@company-brain/plugin-sdk';
 
 import type { AccessExplanation, KnowledgeObject, SearchRequest } from '@company-brain/domain';
-import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
+import type {
+  KnowledgePlugin,
+  PluginContext,
+  PluginManifest,
+  SearchPluginContext,
+} from '@company-brain/plugin-sdk';
 
 const SLACK_API = 'https://slack.com/api';
 
@@ -55,7 +60,10 @@ export class SlackPlugin implements KnowledgePlugin {
     };
   }
 
-  async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
+  async search(
+    search: SearchRequest,
+    context: SearchPluginContext,
+  ): Promise<readonly KnowledgeObject[]> {
     const limit = Math.max(1, Math.min(100, context.resultLimit));
     const response = await this.call<SlackSearchResponse>(
       'search.messages',
@@ -174,7 +182,7 @@ function parseObjectId(objectId: string): { channelId: string; timestamp: string
   } catch {
     // Converted to a stable domain error below.
   }
-  throw new Error('Invalid Slack object ID');
+  throw new PluginRequestError('Invalid Slack object ID', 'invalid-request');
 }
 
 function required(value: string | undefined, message: string): string {

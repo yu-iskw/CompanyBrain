@@ -18,6 +18,9 @@ export interface PluginContext {
   readonly identity: UserIdentity;
   readonly accessToken: string;
   readonly requestId: string;
+}
+
+export interface SearchPluginContext extends PluginContext {
   /** Per-plugin result budget from the application layer (already normalized). */
   readonly resultLimit: number;
 }
@@ -26,7 +29,7 @@ export type PluginFailureCode = Exclude<SourceFailure['code'], 'not-linked'>;
 
 export interface KnowledgePlugin {
   readonly manifest: PluginManifest;
-  search(request: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]>;
+  search(request: SearchRequest, context: SearchPluginContext): Promise<readonly KnowledgeObject[]>;
   getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined>;
   explainAccess(): AccessExplanation;
 }

@@ -2,12 +2,19 @@ import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { SourceNotLinkedError, UnknownSourceError } from '@company-brain/application';
+import { PluginRequestError } from '@company-brain/plugin-sdk';
 import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
-import { ClientFacingError } from './http.js';
-import { buildOAuthProviders, createGitHubOAuth, createSlackOAuth } from './oauth-helpers.js';
+import { ClientFacingError, AuthenticationError } from './http.js';
+import {
+  buildOAuthProviders,
+  exchangeGitHubCode,
+  exchangeSlackCode,
+  githubAuthorizeUrl,
+  slackAuthorizeUrl,
+} from './oauth-helpers.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
 
@@ -19,8 +26,18 @@ const runtime = createRuntime({ credentials: stores.credentials, audit: stores.a
 const auth = new Authenticator(config, stores.sessions, stores.oauthStates);
 const { knownSources: knownOAuthSources, providers: oauthProviders } = buildOAuthProviders(
   [
-    { id: 'slack', config: config.slack, create: createSlackOAuth },
-    { id: 'github', config: config.github, create: createGitHubOAuth },
+    {
+      id: 'slack',
+      config: config.slack,
+      buildAuthorizeUrl: slackAuthorizeUrl,
+      exchange: exchangeSlackCode,
+    },
+    {
+      id: 'github',
+      config: config.github,
+      buildAuthorizeUrl: githubAuthorizeUrl,
+      exchange: exchangeGitHubCode,
+    },
   ],
   runtime.credentials,
   stores.oauthStates,
@@ -205,7 +222,13 @@ function parseSearchRequest(value: unknown): SearchRequest {
   }
   const sourceIds =
     'sourceIds' in value ? readStringArray(value.sourceIds, 'sourceIds') : undefined;
-  const limit = 'limit' in value && typeof value.limit === 'number' ? value.limit : undefined;
+  const limit =
+    'limit' in value && typeof value.limit === 'number' && Number.isFinite(value.limit)
+      ? value.limit
+      : undefined;
+  if ('limit' in value && value.limit !== undefined && limit === undefined) {
+    throw new ClientFacingError('limit must be a finite number');
+  }
   return { query, sourceIds, limit };
 }
 
@@ -266,6 +289,19 @@ function readRequestId(request: IncomingMessage): string {
 function handleError(response: ServerResponse, error: unknown, requestId: string): void {
   if (error instanceof ClientFacingError)
     return json(response, 400, { error: error.message, requestId });
+  if (error instanceof AuthenticationError)
+    return json(response, 401, { error: error.message, requestId });
+  if (error instanceof PluginRequestError) {
+    const status =
+      error.code === 'invalid-request'
+        ? 400
+        : error.code === 'forbidden'
+          ? 403
+          : error.code === 'rate-limited'
+            ? 429
+            : 502;
+    return json(response, status, { error: error.message, requestId });
+  }
   if (error instanceof UnknownSourceError)
     return json(response, 404, { error: error.message, requestId });
   if (error instanceof SourceNotLinkedError)

@@ -1,21 +1,12 @@
 import { randomBytes } from 'node:crypto';
 
-import { ClientFacingError, redirect } from './http.js';
+import { ClientFacingError, isAccessTokenResponse, redirect } from './http.js';
 
 import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
 import type { ServerResponse } from 'node:http';
-
-export function isAccessTokenResponse(value: unknown): value is { readonly access_token: string } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'access_token' in value &&
-    typeof value.access_token === 'string'
-  );
-}
 
 class LinkedOAuth {
   constructor(
@@ -62,11 +53,8 @@ class LinkedOAuth {
 interface OAuthProviderDefinition {
   readonly id: string;
   readonly config?: OAuthClientConfig;
-  readonly create: (
-    config: OAuthClientConfig,
-    credentials: CredentialVault,
-    states: OAuthStateStore,
-  ) => LinkedOAuth;
+  readonly buildAuthorizeUrl: (config: OAuthClientConfig) => URL;
+  readonly exchange: (config: OAuthClientConfig, code: string) => Promise<string>;
 }
 
 export function buildOAuthProviders(
@@ -81,58 +69,42 @@ export function buildOAuthProviders(
   const providers = new Map<string, LinkedOAuth>();
   for (const definition of definitions) {
     if (!definition.config) continue;
-    providers.set(definition.id, definition.create(definition.config, credentials, states));
+    providers.set(
+      definition.id,
+      new LinkedOAuth(
+        definition.id,
+        definition.config,
+        credentials,
+        states,
+        definition.buildAuthorizeUrl,
+        definition.exchange,
+      ),
+    );
   }
   return { knownSources, providers };
 }
 
-export function createSlackOAuth(
-  config: OAuthClientConfig,
-  credentials: CredentialVault,
-  states: OAuthStateStore,
-): LinkedOAuth {
-  return new LinkedOAuth(
-    'slack',
-    config,
-    credentials,
-    states,
-    (oauth) => {
-      const url = new URL('https://slack.com/oauth/v2/authorize');
-      url.search = new URLSearchParams({
-        client_id: oauth.clientId,
-        redirect_uri: oauth.redirectUri,
-        user_scope: 'search:read,channels:history,groups:history,im:history,mpim:history',
-      }).toString();
-      return url;
-    },
-    exchangeSlackCode,
-  );
+export function slackAuthorizeUrl(config: OAuthClientConfig): URL {
+  const url = new URL('https://slack.com/oauth/v2/authorize');
+  url.search = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    user_scope: 'search:read,channels:history,groups:history,im:history,mpim:history',
+  }).toString();
+  return url;
 }
 
-export function createGitHubOAuth(
-  config: OAuthClientConfig,
-  credentials: CredentialVault,
-  states: OAuthStateStore,
-): LinkedOAuth {
-  return new LinkedOAuth(
-    'github',
-    config,
-    credentials,
-    states,
-    (oauth) => {
-      const url = new URL('https://github.com/login/oauth/authorize');
-      url.search = new URLSearchParams({
-        client_id: oauth.clientId,
-        redirect_uri: oauth.redirectUri,
-        scope: 'repo read:org read:user',
-      }).toString();
-      return url;
-    },
-    exchangeGitHubCode,
-  );
+export function githubAuthorizeUrl(config: OAuthClientConfig): URL {
+  const url = new URL('https://github.com/login/oauth/authorize');
+  url.search = new URLSearchParams({
+    client_id: config.clientId,
+    redirect_uri: config.redirectUri,
+    scope: 'repo read:org read:user',
+  }).toString();
+  return url;
 }
 
-async function exchangeGitHubCode(config: OAuthClientConfig, code: string): Promise<string> {
+export async function exchangeGitHubCode(config: OAuthClientConfig, code: string): Promise<string> {
   const response = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
@@ -145,12 +117,12 @@ async function exchangeGitHubCode(config: OAuthClientConfig, code: string): Prom
   });
   const value: unknown = await response.json();
   if (!response.ok || !isAccessTokenResponse(value)) {
-    throw new Error('GitHub OAuth code exchange failed');
+    throw new ClientFacingError('GitHub OAuth code exchange failed');
   }
   return value.access_token;
 }
 
-async function exchangeSlackCode(config: OAuthClientConfig, code: string): Promise<string> {
+export async function exchangeSlackCode(config: OAuthClientConfig, code: string): Promise<string> {
   const response = await fetch('https://slack.com/api/oauth.v2.access', {
     method: 'POST',
     headers: {
@@ -161,7 +133,9 @@ async function exchangeSlackCode(config: OAuthClientConfig, code: string): Promi
   });
   const value: unknown = await response.json();
   if (!response.ok || !isSlackTokenResponse(value)) {
-    throw new Error('Slack OAuth code exchange failed or did not return a delegated user token');
+    throw new ClientFacingError(
+      'Slack OAuth code exchange failed or did not return a delegated user token',
+    );
   }
   return value.authed_user.access_token;
 }

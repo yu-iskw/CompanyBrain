@@ -6,7 +6,12 @@ import type {
   KnowledgeObjectType,
   SearchRequest,
 } from '@company-brain/domain';
-import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
+import type {
+  KnowledgePlugin,
+  PluginContext,
+  PluginManifest,
+  SearchPluginContext,
+} from '@company-brain/plugin-sdk';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -81,7 +86,10 @@ export class GitHubPlugin implements KnowledgePlugin {
     };
   }
 
-  async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
+  async search(
+    search: SearchRequest,
+    context: SearchPluginContext,
+  ): Promise<readonly KnowledgeObject[]> {
     const limit = Math.max(1, Math.min(50, context.resultLimit));
     const perType = Math.max(1, Math.ceil(limit / 2));
     const [codeRaw, issuesRaw] = await Promise.all([
@@ -273,7 +281,7 @@ function parseObjectId(objectId: string): GitHubObjectId {
   } catch {
     // Converted to a stable connector error below.
   }
-  throw new Error('Invalid GitHub object ID');
+  throw new PluginRequestError('Invalid GitHub object ID', 'invalid-request');
 }
 
 function isCodeId(value: unknown): value is Extract<GitHubObjectId, { kind: 'code' }> {

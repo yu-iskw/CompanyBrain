@@ -112,7 +112,6 @@ describe('SlackPlugin', () => {
         identity: { subject: 'u' },
         accessToken: 't',
         requestId: 'r',
-        resultLimit: 20,
       }),
     ).resolves.toBeUndefined();
   });
@@ -124,7 +123,6 @@ describe('SlackPlugin', () => {
         identity: { subject: 'u' },
         accessToken: 't',
         requestId: 'r',
-        resultLimit: 20,
       }),
     ).rejects.toThrow('Invalid Slack object ID');
 
