@@ -71,9 +71,10 @@ export class CompanyBrainService {
     const plugins = this.selectPlugins(request.sourceIds);
     const limit = normalizeLimit(request.limit);
     const perPluginLimit = Math.max(1, Math.ceil(limit / Math.max(1, plugins.length)));
-    const boundedRequest = { ...request, limit: perPluginLimit };
     const outcomes = await Promise.all(
-      plugins.map(async (plugin) => this.searchPlugin(plugin, boundedRequest, identity, requestId)),
+      plugins.map(async (plugin) =>
+        this.searchPlugin(plugin, request, identity, requestId, perPluginLimit),
+      ),
     );
     const results = outcomes.flatMap((outcome) => outcome.results);
     const failures = outcomes.flatMap((outcome) => outcome.failures);
@@ -125,6 +126,7 @@ export class CompanyBrainService {
     request: SearchRequest,
     identity: UserIdentity,
     requestId: string,
+    resultLimit: number,
   ): Promise<{ results: readonly KnowledgeObject[]; failures: readonly SourceFailure[] }> {
     const token = await this.credentials.get(identity.subject, plugin.manifest.id);
     if (!token) {
@@ -134,7 +136,12 @@ export class CompanyBrainService {
       };
     }
     try {
-      const results = await plugin.search(request, { identity, accessToken: token, requestId });
+      const results = await plugin.search(request, {
+        identity,
+        accessToken: token,
+        requestId,
+        resultLimit,
+      });
       return { results, failures: [] };
     } catch (error: unknown) {
       return { results: [], failures: [mapPluginError(plugin.manifest.id, error)] };

@@ -21,14 +21,20 @@ const config = loadConfig();
 const stores = await createStores(config);
 const runtime = createRuntime({ credentials: stores.credentials, audit: stores.audit });
 const auth = new Authenticator(config, stores.sessions, stores.oauthStates);
-const oauthProviders: Readonly<Record<string, LinkedOAuth | undefined>> = {
-  slack: config.slack
-    ? createSlackOAuth(config.slack, runtime.credentials, stores.oauthStates)
-    : undefined,
-  github: config.github
-    ? createGitHubOAuth(config.github, runtime.credentials, stores.oauthStates)
-    : undefined,
-};
+const knownOAuthSources = new Set(['slack', 'github']);
+const oauthProviders = new Map<string, LinkedOAuth>();
+if (config.slack) {
+  oauthProviders.set(
+    'slack',
+    createSlackOAuth(config.slack, runtime.credentials, stores.oauthStates),
+  );
+}
+if (config.github) {
+  oauthProviders.set(
+    'github',
+    createGitHubOAuth(config.github, runtime.credentials, stores.oauthStates),
+  );
+}
 
 if (config.auth.mode === 'local') {
   await seedEnvCredentials(runtime.credentials, config.auth.subject);
@@ -113,11 +119,11 @@ async function handleOAuthRoutes(
 ): Promise<boolean> {
   if (request.method !== 'GET') return false;
   const match = /^\/oauth\/([^/]+)\/(start|callback)$/.exec(url.pathname);
-  if (!match) return false;
-  const sourceId = match[1] ?? '';
-  const action = match[2] ?? '';
-  if (sourceId !== 'slack' && sourceId !== 'github') return false;
-  const provider = sourceId === 'slack' ? oauthProviders.slack : oauthProviders.github;
+  if (!match?.[1] || !match[2]) return false;
+  const sourceId = match[1];
+  const action = match[2];
+  if (!knownOAuthSources.has(sourceId)) return false;
+  const provider = oauthProviders.get(sourceId);
   if (!provider) {
     json(response, 503, { error: `${sourceId} OAuth is not configured` });
     return true;

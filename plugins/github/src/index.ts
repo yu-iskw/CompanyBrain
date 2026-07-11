@@ -82,7 +82,7 @@ export class GitHubPlugin implements KnowledgePlugin {
   }
 
   async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
-    const limit = Math.max(1, Math.min(50, search.limit ?? 20));
+    const limit = Math.max(1, Math.min(50, context.resultLimit ?? search.limit ?? 20));
     const perType = Math.max(1, Math.ceil(limit / 2));
     const [codeRaw, issuesRaw] = await Promise.all([
       this.call(`/search/code?q=${encodeURIComponent(search.query)}&per_page=${perType}`, context),
@@ -129,12 +129,20 @@ export class GitHubPlugin implements KnowledgePlugin {
       },
     });
     if (!response.ok) {
+      if (response.status === 429 || isGitHubRateLimited(response)) {
+        throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'rate-limited');
+      }
       if (response.status === 403) throw new PluginRequestError(`GitHub HTTP 403`, 'forbidden');
-      if (response.status === 429) throw new PluginRequestError(`GitHub HTTP 429`, 'rate-limited');
       throw new Error(`GitHub HTTP ${response.status}`);
     }
     return response.json();
   }
+}
+
+function isGitHubRateLimited(response: Response): boolean {
+  if (response.headers.get('x-ratelimit-remaining') === '0') return true;
+  const retryAfter = response.headers.get('retry-after');
+  return response.status === 403 && retryAfter !== null;
 }
 
 function asSearchResponse<T>(value: unknown): SearchResponse<T> {

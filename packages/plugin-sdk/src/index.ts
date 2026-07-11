@@ -18,7 +18,11 @@ export interface PluginContext {
   readonly identity: UserIdentity;
   readonly accessToken: string;
   readonly requestId: string;
+  /** Per-plugin result budget from the application layer (already normalized). */
+  readonly resultLimit?: number;
 }
+
+export type PluginFailureCode = Exclude<SourceFailure['code'], 'not-linked'>;
 
 export interface KnowledgePlugin {
   readonly manifest: PluginManifest;
@@ -36,7 +40,7 @@ export interface CredentialVault {
 export class PluginRequestError extends Error {
   constructor(
     message: string,
-    readonly code: SourceFailure['code'],
+    readonly code: PluginFailureCode,
   ) {
     super(message);
     this.name = 'PluginRequestError';
