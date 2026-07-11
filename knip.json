@@ -8,6 +8,12 @@
     },
     "packages/*": {
       "project": ["src/**/*.ts"]
+    },
+    "apps/*": {
+      "project": ["src/**/*.ts"]
+    },
+    "plugins/*": {
+      "project": ["src/**/*.ts"]
     }
   }
 }

@@ -1,0 +1,22 @@
+{
+  "name": "@company-brain/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@company-brain/application": "workspace:*",
+    "@company-brain/domain": "workspace:*",
+    "@company-brain/persistence": "workspace:*",
+    "@company-brain/plugin-sdk": "workspace:*",
+    "@company-brain/runtime": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

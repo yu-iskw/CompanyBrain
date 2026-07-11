@@ -1,0 +1,268 @@
+import type {
+  AccessExplanation,
+  KnowledgeObject,
+  KnowledgeObjectType,
+  SearchRequest,
+} from '@company-brain/domain';
+import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
+
+const GITHUB_API = 'https://api.github.com';
+
+interface RepositorySummary {
+  readonly full_name: string;
+  readonly html_url: string;
+}
+
+interface CodeItem {
+  readonly name: string;
+  readonly path: string;
+  readonly html_url: string;
+  readonly repository: RepositorySummary;
+  readonly text_matches?: readonly { readonly fragment?: string }[];
+}
+
+interface IssueItem {
+  readonly number: number;
+  readonly title: string;
+  readonly body?: string | null;
+  readonly html_url: string;
+  readonly created_at?: string;
+  readonly updated_at?: string;
+  readonly user?: { readonly login?: string } | null;
+  readonly pull_request?: object;
+  readonly repository_url: string;
+}
+
+interface SearchResponse<T> {
+  readonly items: readonly T[];
+}
+
+interface ContentResponse {
+  readonly content?: string;
+  readonly encoding?: string;
+  readonly html_url?: string;
+  readonly name?: string;
+  readonly path?: string;
+}
+
+type GitHubObjectId =
+  | {
+      readonly kind: 'code';
+      readonly owner: string;
+      readonly repository: string;
+      readonly path: string;
+    }
+  | {
+      readonly kind: 'issue';
+      readonly owner: string;
+      readonly repository: string;
+      readonly number: number;
+    };
+
+export class GitHubPlugin implements KnowledgePlugin {
+  readonly manifest: PluginManifest = {
+    id: 'github',
+    displayName: 'GitHub',
+    version: '0.1.0',
+    capabilities: ['search', 'get-object', 'explain-access'],
+    credentialType: 'oauth-user-token',
+    metadataStorage: 'non-sensitive-only',
+  };
+
+  constructor(private readonly request: typeof fetch = fetch) {}
+
+  explainAccess(): AccessExplanation {
+    return {
+      sourceId: 'github',
+      mode: 'delegated-user',
+      summary: 'GitHub is queried live using the linked user token and its repository permissions.',
+      requiredScopes: ['repo', 'read:org', 'read:user'],
+    };
+  }
+
+  async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
+    const limit = Math.max(1, Math.min(50, search.limit ?? 20));
+    const perType = Math.max(1, Math.ceil(limit / 2));
+    const [code, issues] = await Promise.all([
+      this.call<SearchResponse<CodeItem>>(
+        `/search/code?q=${encodeURIComponent(search.query)}&per_page=${perType}`,
+        context,
+      ),
+      this.call<SearchResponse<IssueItem>>(
+        `/search/issues?q=${encodeURIComponent(search.query)}&per_page=${perType}`,
+        context,
+      ),
+    ]);
+    return [
+      ...code.items.map((item) => codeToKnowledgeObject(item)),
+      ...issues.items.map((item) => issueToKnowledgeObject(item)),
+    ].slice(0, limit);
+  }
+
+  async getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined> {
+    const id = parseObjectId(objectId);
+    if (id.kind === 'code') {
+      const content = await this.call<ContentResponse>(
+        `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/contents/${encodePath(id.path)}`,
+        context,
+      );
+      return contentToKnowledgeObject(id, content);
+    }
+    const issue = await this.call<IssueItem>(
+      `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/issues/${id.number}`,
+      context,
+    );
+    return issueToKnowledgeObject(issue, id);
+  }
+
+  private async call<T>(path: string, context: PluginContext): Promise<T> {
+    const response = await this.request(`${GITHUB_API}${path}`, {
+      headers: {
+        accept: 'application/vnd.github.text-match+json, application/vnd.github+json',
+        authorization: `Bearer ${context.accessToken}`,
+        'user-agent': 'CompanyBrain/0.1',
+        'x-github-api-version': '2026-03-10',
+      },
+      signal: context.signal,
+    });
+    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+    return (await response.json()) as T;
+  }
+}
+
+function codeToKnowledgeObject(item: CodeItem): KnowledgeObject {
+  const [owner, repository] = splitRepository(item.repository.full_name);
+  const id: GitHubObjectId = { kind: 'code', owner, repository, path: item.path };
+  return makeObject({
+    id,
+    type: 'file',
+    title: `${item.repository.full_name}/${item.path}`,
+    excerpt: item.text_matches?.[0]?.fragment ?? item.path,
+    url: item.html_url,
+    metadata: { repository: item.repository.full_name, path: item.path },
+  });
+}
+
+function issueToKnowledgeObject(item: IssueItem, knownId?: GitHubObjectId): KnowledgeObject {
+  const [owner, repository] =
+    knownId?.kind === 'issue'
+      ? [knownId.owner, knownId.repository]
+      : splitRepositoryUrl(item.repository_url);
+  const id: GitHubObjectId = { kind: 'issue', owner, repository, number: item.number };
+  return makeObject({
+    id,
+    type: item.pull_request ? 'pull-request' : 'issue',
+    title: `${owner}/${repository}#${item.number}: ${item.title}`,
+    excerpt: truncate(item.body ?? ''),
+    url: item.html_url,
+    createdAt: item.created_at,
+    updatedAt: item.updated_at,
+    author: item.user?.login,
+    metadata: { repository: `${owner}/${repository}`, number: item.number },
+  });
+}
+
+function contentToKnowledgeObject(
+  id: Extract<GitHubObjectId, { kind: 'code' }>,
+  item: ContentResponse,
+): KnowledgeObject {
+  const content = item.encoding === 'base64' && item.content ? decodeContent(item.content) : '';
+  const path = item.path ?? id.path;
+  return makeObject({
+    id,
+    type: 'file',
+    title: `${id.owner}/${id.repository}/${path}`,
+    excerpt: truncate(content),
+    url: item.html_url ?? `https://github.com/${id.owner}/${id.repository}/blob/HEAD/${path}`,
+    metadata: { repository: `${id.owner}/${id.repository}`, path },
+  });
+}
+
+function makeObject(value: {
+  readonly id: GitHubObjectId;
+  readonly type: KnowledgeObjectType;
+  readonly title: string;
+  readonly excerpt: string;
+  readonly url: string;
+  readonly createdAt?: string;
+  readonly updatedAt?: string;
+  readonly author?: string;
+  readonly metadata: Readonly<Record<string, string | number | boolean>>;
+}): KnowledgeObject {
+  const objectId = Buffer.from(JSON.stringify(value.id), 'utf8').toString('base64url');
+  return {
+    id: `github:${objectId}`,
+    sourceId: 'github',
+    type: value.type,
+    title: value.title,
+    excerpt: value.excerpt,
+    url: value.url,
+    createdAt: value.createdAt,
+    updatedAt: value.updatedAt,
+    author: value.author,
+    metadata: value.metadata,
+    citation: {
+      sourceId: 'github',
+      objectId,
+      url: value.url,
+      title: value.title,
+      retrievedAt: new Date().toISOString(),
+    },
+  };
+}
+
+function parseObjectId(objectId: string): GitHubObjectId {
+  try {
+    const value: unknown = JSON.parse(Buffer.from(objectId, 'base64url').toString('utf8'));
+    if (isCodeId(value) || isIssueId(value)) return value;
+  } catch {
+    // Converted to a stable connector error below.
+  }
+  throw new Error('Invalid GitHub object ID');
+}
+
+function isCodeId(value: unknown): value is Extract<GitHubObjectId, { kind: 'code' }> {
+  return isBaseId(value, 'code') && 'path' in value && typeof value.path === 'string';
+}
+
+function isIssueId(value: unknown): value is Extract<GitHubObjectId, { kind: 'issue' }> {
+  return isBaseId(value, 'issue') && 'number' in value && Number.isInteger(value.number);
+}
+
+function isBaseId(value: unknown, kind: string): value is Record<string, unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'kind' in value &&
+    value.kind === kind &&
+    'owner' in value &&
+    typeof value.owner === 'string' &&
+    'repository' in value &&
+    typeof value.repository === 'string'
+  );
+}
+
+function splitRepository(fullName: string): [string, string] {
+  const parts = fullName.split('/');
+  if (parts.length !== 2 || !parts[0] || !parts[1])
+    throw new Error('GitHub returned an invalid repository name');
+  return [parts[0], parts[1]];
+}
+
+function splitRepositoryUrl(url: string): [string, string] {
+  const match = /\/repos\/([^/]+)\/([^/]+)$/.exec(url);
+  if (!match?.[1] || !match[2]) throw new Error('GitHub returned an invalid repository URL');
+  return [match[1], match[2]];
+}
+
+function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
+}
+
+function decodeContent(content: string): string {
+  return Buffer.from(content.replace(/\s/g, ''), 'base64').toString('utf8');
+}
+
+function truncate(value: string): string {
+  return value.length <= 2_000 ? value : `${value.slice(0, 1_997)}…`;
+}

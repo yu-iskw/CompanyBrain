@@ -1,13 +1,16 @@
 {
-  "name": "typescript-template",
+  "name": "company-brain",
   "version": "1.0.0",
   "private": true,
-  "description": "",
+  "description": "Federated, permission-aware enterprise knowledge retrieval for humans and AI agents.",
   "keywords": [],
   "license": "Apache-2.0",
   "author": "",
   "scripts": {
     "build": "pnpm --recursive build",
+    "dev": "pnpm --filter @company-brain/api dev",
+    "start": "pnpm --filter @company-brain/api start",
+    "mcp": "pnpm --filter @company-brain/mcp-server start",
     "trunk": "trunk",
     "format": "pnpm format:trunk",
     "format:all": "pnpm format:trunk-all",
@@ -30,6 +33,7 @@
   },
   "devDependencies": {
     "@trunkio/launcher": "^1.3.4",
+    "@types/node": "^24.10.0",
     "@typescript-eslint/eslint-plugin": "^8.59.1",
     "@typescript-eslint/parser": "^8.59.1",
     "@vitest/coverage-v8": "4.1.3",
