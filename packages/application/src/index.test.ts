@@ -101,6 +101,7 @@ describe('CompanyBrainService', () => {
         identity: { subject: 'alice' },
         accessToken: 'token',
         requestId: 'request',
+        resultLimit: 20,
       },
     );
     const completePlugin: KnowledgePlugin = {

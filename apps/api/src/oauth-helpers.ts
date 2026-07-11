@@ -1,18 +1,12 @@
 import { randomBytes } from 'node:crypto';
 
+import { ClientFacingError, redirect } from './http.js';
+
 import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
 import type { ServerResponse } from 'node:http';
-
-/** Client-facing OAuth/auth failures mapped to HTTP 400 by the API. */
-export class ClientFacingError extends Error {}
-
-export function redirect(response: ServerResponse, location: string): void {
-  response.writeHead(302, { location });
-  response.end();
-}
 
 export function isAccessTokenResponse(value: unknown): value is { readonly access_token: string } {
   return (
@@ -25,7 +19,7 @@ export function isAccessTokenResponse(value: unknown): value is { readonly acces
 
 export class LinkedOAuth {
   constructor(
-    private readonly sourceId: string,
+    readonly sourceId: string,
     private readonly config: OAuthClientConfig,
     private readonly credentials: CredentialVault,
     private readonly states: OAuthStateStore,
@@ -63,6 +57,33 @@ export class LinkedOAuth {
     await this.credentials.put(identity.subject, this.sourceId, token);
     redirect(response, `/?linked=${this.sourceId}`);
   }
+}
+
+export interface OAuthProviderDefinition {
+  readonly id: string;
+  readonly config?: OAuthClientConfig;
+  readonly create: (
+    config: OAuthClientConfig,
+    credentials: CredentialVault,
+    states: OAuthStateStore,
+  ) => LinkedOAuth;
+}
+
+export function buildOAuthProviders(
+  definitions: readonly OAuthProviderDefinition[],
+  credentials: CredentialVault,
+  states: OAuthStateStore,
+): {
+  readonly knownSources: ReadonlySet<string>;
+  readonly providers: ReadonlyMap<string, LinkedOAuth>;
+} {
+  const knownSources = new Set(definitions.map((definition) => definition.id));
+  const providers = new Map<string, LinkedOAuth>();
+  for (const definition of definitions) {
+    if (!definition.config) continue;
+    providers.set(definition.id, definition.create(definition.config, credentials, states));
+  }
+  return { knownSources, providers };
 }
 
 export function createSlackOAuth(

@@ -6,12 +6,8 @@ import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
-import {
-  ClientFacingError,
-  createGitHubOAuth,
-  createSlackOAuth,
-  type LinkedOAuth,
-} from './oauth-helpers.js';
+import { ClientFacingError } from './http.js';
+import { buildOAuthProviders, createGitHubOAuth, createSlackOAuth } from './oauth-helpers.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
 
@@ -21,20 +17,14 @@ const config = loadConfig();
 const stores = await createStores(config);
 const runtime = createRuntime({ credentials: stores.credentials, audit: stores.audit });
 const auth = new Authenticator(config, stores.sessions, stores.oauthStates);
-const knownOAuthSources = new Set(['slack', 'github']);
-const oauthProviders = new Map<string, LinkedOAuth>();
-if (config.slack) {
-  oauthProviders.set(
-    'slack',
-    createSlackOAuth(config.slack, runtime.credentials, stores.oauthStates),
-  );
-}
-if (config.github) {
-  oauthProviders.set(
-    'github',
-    createGitHubOAuth(config.github, runtime.credentials, stores.oauthStates),
-  );
-}
+const { knownSources: knownOAuthSources, providers: oauthProviders } = buildOAuthProviders(
+  [
+    { id: 'slack', config: config.slack, create: createSlackOAuth },
+    { id: 'github', config: config.github, create: createGitHubOAuth },
+  ],
+  runtime.credentials,
+  stores.oauthStates,
+);
 
 if (config.auth.mode === 'local') {
   await seedEnvCredentials(runtime.credentials, config.auth.subject);
@@ -96,10 +86,18 @@ async function handlePublicRoutes(
     return true;
   }
   if (request.method === 'GET' && url.pathname === '/auth/login') {
+    if (config.auth.mode !== 'oidc') {
+      json(response, 404, { error: 'OIDC authentication is not configured' });
+      return true;
+    }
     await auth.beginLogin(response);
     return true;
   }
   if (request.method === 'GET' && url.pathname === '/auth/callback') {
+    if (config.auth.mode !== 'oidc') {
+      json(response, 404, { error: 'OIDC authentication is not configured' });
+      return true;
+    }
     await auth.finishLogin(
       request,
       requiredParameter(url, 'code'),

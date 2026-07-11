@@ -56,7 +56,7 @@ export class SlackPlugin implements KnowledgePlugin {
   }
 
   async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
-    const limit = Math.max(1, Math.min(100, context.resultLimit ?? search.limit ?? 20));
+    const limit = Math.max(1, Math.min(100, context.resultLimit));
     const response = await this.call<SlackSearchResponse>(
       'search.messages',
       new URLSearchParams({ query: search.query, count: String(limit), sort: 'score' }),

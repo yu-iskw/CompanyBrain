@@ -19,7 +19,7 @@ export interface PluginContext {
   readonly accessToken: string;
   readonly requestId: string;
   /** Per-plugin result budget from the application layer (already normalized). */
-  readonly resultLimit?: number;
+  readonly resultLimit: number;
 }
 
 export type PluginFailureCode = Exclude<SourceFailure['code'], 'not-linked'>;

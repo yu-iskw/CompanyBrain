@@ -6,6 +6,7 @@ const context = {
   identity: { subject: 'alice' },
   accessToken: 'github-token',
   requestId: 'request',
+  resultLimit: 20,
 };
 
 describe('GitHubPlugin', () => {

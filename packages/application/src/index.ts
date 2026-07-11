@@ -98,7 +98,12 @@ export class CompanyBrainService {
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
     if (!token) throw new SourceNotLinkedError(sourceId);
-    const result = await plugin.getObject(objectId, { identity, accessToken: token, requestId });
+    const result = await plugin.getObject(objectId, {
+      identity,
+      accessToken: token,
+      requestId,
+      resultLimit: 1,
+    });
     await this.audit.append({
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),

@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { ClientFacingError, isAccessTokenResponse, redirect } from './oauth-helpers.js';
+import { ClientFacingError, redirect } from './http.js';
+import { isAccessTokenResponse } from './oauth-helpers.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -32,7 +33,9 @@ export class Authenticator {
   }
 
   async beginLogin(response: ServerResponse): Promise<void> {
-    if (this.config.auth.mode !== 'oidc') throw new Error('OIDC authentication is not configured');
+    if (this.config.auth.mode !== 'oidc') {
+      throw new ClientFacingError('OIDC authentication is not configured');
+    }
     const state = randomBytes(24).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
     await this.states.put(state, 'oidc', { verifier }, new Date(Date.now() + 10 * 60_000));
@@ -59,7 +62,9 @@ export class Authenticator {
     state: string,
     response: ServerResponse,
   ): Promise<void> {
-    if (this.config.auth.mode !== 'oidc') throw new Error('OIDC authentication is not configured');
+    if (this.config.auth.mode !== 'oidc') {
+      throw new ClientFacingError('OIDC authentication is not configured');
+    }
     const cookieState = readCookies(request.headers.cookie).get(LOGIN_STATE_COOKIE);
     if (!cookieState || cookieState !== state) {
       throw new ClientFacingError('Invalid or mismatched OIDC login state');
