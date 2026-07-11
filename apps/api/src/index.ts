@@ -1,12 +1,14 @@
+import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { SourceNotLinkedError, UnknownSourceError } from '@company-brain/application';
 import type { SearchRequest, UserIdentity } from '@company-brain/domain';
-import { createRuntime } from '@company-brain/runtime';
+import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
 import { GitHubOAuth } from './github-oauth.js';
+import { ClientFacingError } from './oauth-helpers.js';
 import { SlackOAuth } from './slack-oauth.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
@@ -22,19 +24,17 @@ const githubOAuth = config.github
   ? new GitHubOAuth(config.github, runtime.credentials, stores.oauthStates)
   : undefined;
 
-if (config.auth.mode === 'local' && process.env.SLACK_USER_TOKEN) {
-  await runtime.credentials.put(config.auth.subject, 'slack', process.env.SLACK_USER_TOKEN);
-}
-if (config.auth.mode === 'local' && process.env.GITHUB_USER_TOKEN) {
-  await runtime.credentials.put(config.auth.subject, 'github', process.env.GITHUB_USER_TOKEN);
+if (config.auth.mode === 'local') {
+  await seedEnvCredentials(runtime.credentials, config.auth.subject);
 }
 
 const server = createServer(async (request, response) => {
   const requestId = readRequestId(request);
+  const nonce = randomBytes(16).toString('base64url');
   response.setHeader('x-request-id', requestId);
-  setSecurityHeaders(response);
+  setSecurityHeaders(response, nonce);
   try {
-    await route(request, response, requestId);
+    await route(request, response, requestId, nonce);
   } catch (error: unknown) {
     handleError(response, error, requestId);
   }
@@ -44,10 +44,19 @@ server.listen(config.port, () => {
   process.stdout.write(`CompanyBrain listening on ${config.baseUrl}\n`);
 });
 
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    server.close(() => {
+      void stores.close().finally(() => process.exit(0));
+    });
+  });
+}
+
 async function route(
   request: IncomingMessage,
   response: ServerResponse,
   requestId: string,
+  nonce: string,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', config.baseUrl);
   if (request.method === 'GET' && url.pathname === '/healthz')
@@ -55,6 +64,7 @@ async function route(
   if (request.method === 'GET' && url.pathname === '/auth/login') return auth.beginLogin(response);
   if (request.method === 'GET' && url.pathname === '/auth/callback') {
     return auth.finishLogin(
+      request,
       requiredParameter(url, 'code'),
       requiredParameter(url, 'state'),
       response,
@@ -64,7 +74,7 @@ async function route(
   const identity = await auth.authenticate(request);
   if (!identity)
     return json(response, 401, { error: 'Authentication required', loginUrl: '/auth/login' });
-  if (request.method === 'GET' && url.pathname === '/') return html(response, webPage);
+  if (request.method === 'GET' && url.pathname === '/') return html(response, webPage(nonce));
   if (request.method === 'GET' && url.pathname === '/oauth/slack/start') {
     if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
     return slackOAuth.begin(identity, response);
@@ -72,6 +82,7 @@ async function route(
   if (request.method === 'GET' && url.pathname === '/oauth/slack/callback') {
     if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
     return slackOAuth.finish(
+      identity,
       requiredParameter(url, 'code'),
       requiredParameter(url, 'state'),
       response,
@@ -84,6 +95,7 @@ async function route(
   if (request.method === 'GET' && url.pathname === '/oauth/github/callback') {
     if (!githubOAuth) return json(response, 503, { error: 'GitHub OAuth is not configured' });
     return githubOAuth.finish(
+      identity,
       requiredParameter(url, 'code'),
       requiredParameter(url, 'state'),
       response,
@@ -184,10 +196,10 @@ function html(response: ServerResponse, value: string): void {
   response.end(value);
 }
 
-function setSecurityHeaders(response: ServerResponse): void {
+function setSecurityHeaders(response: ServerResponse, nonce: string): void {
   response.setHeader(
     'content-security-policy',
-    "default-src 'self'; script-src 'nonce-company-brain'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+    `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`,
   );
   response.setHeader('referrer-policy', 'no-referrer');
   response.setHeader('x-content-type-options', 'nosniff');
@@ -200,7 +212,7 @@ function readRequestId(request: IncomingMessage): string {
 }
 
 function handleError(response: ServerResponse, error: unknown, requestId: string): void {
-  if (error instanceof BadRequestError)
+  if (error instanceof BadRequestError || error instanceof ClientFacingError)
     return json(response, 400, { error: error.message, requestId });
   if (error instanceof UnknownSourceError)
     return json(response, 404, { error: error.message, requestId });

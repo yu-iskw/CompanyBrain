@@ -5,12 +5,15 @@ import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore, SessionStore } from '@company-brain/persistence';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
+import { ClientFacingError, isAccessTokenResponse } from './oauth-helpers.js';
 
 interface UserInfo {
   readonly sub: string;
   readonly email?: string;
   readonly name?: string;
 }
+
+const LOGIN_STATE_COOKIE = 'company_brain_login_state';
 
 export class Authenticator {
   constructor(
@@ -43,13 +46,26 @@ export class Authenticator {
       code_challenge: createHash('sha256').update(verifier).digest('base64url'),
       code_challenge_method: 'S256',
     }).toString();
+    response.setHeader(
+      'set-cookie',
+      `${LOGIN_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${this.config.production ? '; Secure' : ''}`,
+    );
     redirect(response, url.toString());
   }
 
-  async finishLogin(code: string, state: string, response: ServerResponse): Promise<void> {
+  async finishLogin(
+    request: IncomingMessage,
+    code: string,
+    state: string,
+    response: ServerResponse,
+  ): Promise<void> {
     if (this.config.auth.mode !== 'oidc') throw new Error('OIDC authentication is not configured');
+    const cookieState = readCookies(request.headers.cookie).get(LOGIN_STATE_COOKIE);
+    if (!cookieState || cookieState !== state) {
+      throw new ClientFacingError('Invalid or mismatched OIDC login state');
+    }
     const pending = await this.states.take(state, 'oidc');
-    if (!pending?.verifier) throw new Error('Invalid or expired OAuth state');
+    if (!pending?.verifier) throw new ClientFacingError('Invalid or expired OAuth state');
     const accessToken = await exchangeOidcCode(
       this.config,
       this.config.auth,
@@ -59,7 +75,10 @@ export class Authenticator {
     const identity = await fetchUserInfo(this.config.auth, accessToken);
     const sessionId = randomBytes(32).toString('base64url');
     await this.sessions.put(sessionId, identity, new Date(Date.now() + 8 * 60 * 60_000));
-    response.setHeader('set-cookie', sessionCookie(sessionId, this.config.production));
+    response.setHeader('set-cookie', [
+      sessionCookie(sessionId, this.config.production),
+      clearCookie(LOGIN_STATE_COOKIE, this.config.production),
+    ]);
     redirect(response, '/');
   }
 }
@@ -82,7 +101,7 @@ async function fetchUserInfo(config: OidcAuthConfig, accessToken: string): Promi
   const response = await fetch(config.userInfoUrl, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) return Promise.reject(new Error('OIDC userinfo rejected the access token'));
+  if (!response.ok) throw new Error('OIDC userinfo rejected the access token');
   const value: unknown = await response.json();
   if (!isUserInfo(value)) throw new Error('OIDC userinfo response is missing sub');
   return { subject: value.sub, email: value.email, displayName: value.name };
@@ -114,21 +133,16 @@ async function exchangeOidcCode(
     body,
   });
   const value: unknown = await response.json();
-  if (!response.ok || !isTokenResponse(value)) throw new Error('OIDC code exchange failed');
+  if (!response.ok || !isAccessTokenResponse(value)) throw new Error('OIDC code exchange failed');
   return value.access_token;
-}
-
-function isTokenResponse(value: unknown): value is { readonly access_token: string } {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'access_token' in value &&
-    typeof value.access_token === 'string'
-  );
 }
 
 function sessionCookie(sessionId: string, production: boolean): string {
   return `company_brain_session=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${production ? '; Secure' : ''}`;
+}
+
+function clearCookie(name: string, production: boolean): string {
+  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${production ? '; Secure' : ''}`;
 }
 
 export function redirect(response: ServerResponse, location: string): void {

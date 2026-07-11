@@ -21,6 +21,7 @@ describe('in-memory durable-store ports', () => {
     await states.put('state', 'github', { subject: 'alice' }, new Date(Date.now() + 60_000));
 
     expect(await states.take('state', 'slack')).toBeUndefined();
+    expect(await states.take('state', 'github')).toEqual({ subject: 'alice' });
     expect(await states.take('state', 'github')).toBeUndefined();
 
     await states.put('state-2', 'github', { subject: 'alice' }, new Date(Date.now() + 60_000));

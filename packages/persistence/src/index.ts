@@ -2,8 +2,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 
 import { Pool, type PoolConfig } from 'pg';
 
-import type { AuditEvent, AuditSink } from '@company-brain/application';
-import type { UserIdentity } from '@company-brain/domain';
+import type { AuditEvent, AuditSink, UserIdentity } from '@company-brain/domain';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
 
 export interface SessionStore {
@@ -70,10 +69,13 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
 
   take(state: string, flow: string): Promise<Readonly<Record<string, string>> | undefined> {
     const stored = this.#states.get(state);
-    this.#states.delete(state);
     if (!stored || stored.flow !== flow || stored.expiresAt.getTime() <= Date.now()) {
+      if (stored?.expiresAt.getTime() && stored.expiresAt.getTime() <= Date.now()) {
+        this.#states.delete(state);
+      }
       return Promise.resolve(undefined);
     }
+    this.#states.delete(state);
     return Promise.resolve(stored.payload);
   }
 }

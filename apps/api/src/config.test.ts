@@ -24,6 +24,15 @@ describe('loadConfig', () => {
         OIDC_USERINFO_URL: 'https://identity.example/userinfo',
         OIDC_CLIENT_ID: 'client',
       }),
-    ).toThrow('DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY');
+    ).toThrow('DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY are required in production');
+  });
+
+  it('rejects partial database configuration', () => {
+    expect(() => loadConfig({ DATABASE_URL: 'postgresql://localhost/db' })).toThrow(
+      'DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY must both be set, or neither',
+    );
+    expect(() => loadConfig({ CREDENTIAL_ENCRYPTION_KEY: 'dGVzdA==' })).toThrow(
+      'DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY must both be set, or neither',
+    );
   });
 });

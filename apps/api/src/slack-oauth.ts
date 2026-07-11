@@ -1,48 +1,56 @@
-import { randomBytes } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
 
-import type { SlackOAuthConfig } from './config.js';
-import { redirect } from './auth.js';
+import type { OAuthClientConfig } from './config.js';
+import { beginLinkedOAuth, finishLinkedOAuth } from './oauth-helpers.js';
 
 export class SlackOAuth {
   constructor(
-    private readonly config: SlackOAuthConfig,
+    private readonly config: OAuthClientConfig,
     private readonly credentials: CredentialVault,
     private readonly states: OAuthStateStore,
   ) {}
 
   async begin(identity: UserIdentity, response: ServerResponse): Promise<void> {
-    const state = randomBytes(24).toString('base64url');
-    await this.states.put(
-      state,
-      'slack',
-      { subject: identity.subject },
-      new Date(Date.now() + 10 * 60_000),
-    );
-    const url = new URL('https://slack.com/oauth/v2/authorize');
-    url.search = new URLSearchParams({
+    const authorizeUrl = new URL('https://slack.com/oauth/v2/authorize');
+    authorizeUrl.search = new URLSearchParams({
       client_id: this.config.clientId,
       redirect_uri: this.config.redirectUri,
-      state,
       user_scope: 'search:read,channels:history,groups:history,im:history,mpim:history',
     }).toString();
-    redirect(response, url.toString());
+    await beginLinkedOAuth({
+      states: this.states,
+      flow: 'slack',
+      identity,
+      authorizeUrl,
+      response,
+    });
   }
 
-  async finish(code: string, state: string, response: ServerResponse): Promise<void> {
-    const pending = await this.states.take(state, 'slack');
-    if (!pending?.subject) throw new Error('Invalid or expired Slack OAuth state');
-    const token = await exchangeCode(this.config, code);
-    await this.credentials.put(pending.subject, 'slack', token);
-    redirect(response, '/?linked=slack');
+  async finish(
+    identity: UserIdentity,
+    code: string,
+    state: string,
+    response: ServerResponse,
+  ): Promise<void> {
+    await finishLinkedOAuth({
+      states: this.states,
+      credentials: this.credentials,
+      identity,
+      flow: 'slack',
+      sourceId: 'slack',
+      code,
+      state,
+      exchange: (oauthCode) => exchangeCode(this.config, oauthCode),
+      response,
+    });
   }
 }
 
-async function exchangeCode(config: SlackOAuthConfig, code: string): Promise<string> {
+async function exchangeCode(config: OAuthClientConfig, code: string): Promise<string> {
   const response = await fetch('https://slack.com/api/oauth.v2.access', {
     method: 'POST',
     headers: {

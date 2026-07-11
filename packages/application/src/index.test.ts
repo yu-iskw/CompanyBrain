@@ -18,7 +18,6 @@ const plugin: KnowledgePlugin = {
     id: 'test',
     displayName: 'Test',
     version: '1.0.0',
-    capabilities: ['search', 'get-object', 'explain-access'],
     credentialType: 'oauth-user-token',
     metadataStorage: 'non-sensitive-only',
   },

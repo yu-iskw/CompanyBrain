@@ -29,3 +29,16 @@ export function createRuntime(
     credentials,
   };
 }
+
+export async function seedEnvCredentials(
+  credentials: CredentialVault,
+  subject: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (environment.SLACK_USER_TOKEN) {
+    await credentials.put(subject, 'slack', environment.SLACK_USER_TOKEN);
+  }
+  if (environment.GITHUB_USER_TOKEN) {
+    await credentials.put(subject, 'github', environment.GITHUB_USER_TOKEN);
+  }
+}

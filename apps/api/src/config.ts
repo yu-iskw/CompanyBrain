@@ -3,8 +3,8 @@ export interface AppConfig {
   readonly port: number;
   readonly production: boolean;
   readonly auth: LocalAuthConfig | OidcAuthConfig;
-  readonly slack?: SlackOAuthConfig;
-  readonly github?: GitHubOAuthConfig;
+  readonly slack?: OAuthClientConfig;
+  readonly github?: OAuthClientConfig;
   readonly database?: DatabaseConfig;
 }
 
@@ -23,13 +23,7 @@ export interface OidcAuthConfig {
   readonly scopes: string;
 }
 
-export interface SlackOAuthConfig {
-  readonly clientId: string;
-  readonly clientSecret: string;
-  readonly redirectUri: string;
-}
-
-export interface GitHubOAuthConfig {
+export interface OAuthClientConfig {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly redirectUri: string;
@@ -53,35 +47,57 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): AppCon
     port: readPort(environment.PORT),
     production,
     auth,
-    slack: slackOAuth(environment, baseUrl),
-    github: githubOAuth(environment, baseUrl),
+    slack: optionalOAuthClient(environment, {
+      clientId: 'SLACK_CLIENT_ID',
+      clientSecret: 'SLACK_CLIENT_SECRET',
+      redirectUri: 'SLACK_REDIRECT_URI',
+      defaultPath: '/oauth/slack/callback',
+      baseUrl,
+    }),
+    github: optionalOAuthClient(environment, {
+      clientId: 'GITHUB_CLIENT_ID',
+      clientSecret: 'GITHUB_CLIENT_SECRET',
+      redirectUri: 'GITHUB_REDIRECT_URI',
+      defaultPath: '/oauth/github/callback',
+      baseUrl,
+    }),
     database: database(environment, production),
   };
 }
 
-function githubOAuth(
+function optionalOAuthClient(
   environment: NodeJS.ProcessEnv,
-  baseUrl: string,
-): GitHubOAuthConfig | undefined {
-  if (!environment.GITHUB_CLIENT_ID || !environment.GITHUB_CLIENT_SECRET) return undefined;
+  options: {
+    readonly clientId: string;
+    readonly clientSecret: string;
+    readonly redirectUri: string;
+    readonly defaultPath: string;
+    readonly baseUrl: string;
+  },
+): OAuthClientConfig | undefined {
+  const clientId = environment[options.clientId];
+  const clientSecret = environment[options.clientSecret];
+  if (!clientId || !clientSecret) return undefined;
   return {
-    clientId: environment.GITHUB_CLIENT_ID,
-    clientSecret: environment.GITHUB_CLIENT_SECRET,
-    redirectUri: environment.GITHUB_REDIRECT_URI ?? `${baseUrl}/oauth/github/callback`,
+    clientId,
+    clientSecret,
+    redirectUri: environment[options.redirectUri] ?? `${options.baseUrl}${options.defaultPath}`,
   };
 }
 
 function database(environment: NodeJS.ProcessEnv, production: boolean): DatabaseConfig | undefined {
-  if (!environment.DATABASE_URL || !environment.CREDENTIAL_ENCRYPTION_KEY) {
-    if (production) {
-      throw new Error('DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY are required in production');
-    }
-    return undefined;
+  const connectionString = environment.DATABASE_URL;
+  const credentialEncryptionKey = environment.CREDENTIAL_ENCRYPTION_KEY;
+  if (connectionString && credentialEncryptionKey) {
+    return { connectionString, credentialEncryptionKey };
   }
-  return {
-    connectionString: environment.DATABASE_URL,
-    credentialEncryptionKey: environment.CREDENTIAL_ENCRYPTION_KEY,
-  };
+  if (connectionString || credentialEncryptionKey) {
+    throw new Error('DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY must both be set, or neither');
+  }
+  if (production) {
+    throw new Error('DATABASE_URL and CREDENTIAL_ENCRYPTION_KEY are required in production');
+  }
+  return undefined;
 }
 
 function localAuth(environment: NodeJS.ProcessEnv): LocalAuthConfig {
@@ -97,15 +113,6 @@ function oidcAuth(environment: NodeJS.ProcessEnv): OidcAuthConfig {
     clientId: required(environment.OIDC_CLIENT_ID, 'OIDC_CLIENT_ID'),
     clientSecret: environment.OIDC_CLIENT_SECRET,
     scopes: environment.OIDC_SCOPES ?? 'openid profile email',
-  };
-}
-
-function slackOAuth(environment: NodeJS.ProcessEnv, baseUrl: string): SlackOAuthConfig | undefined {
-  if (!environment.SLACK_CLIENT_ID || !environment.SLACK_CLIENT_SECRET) return undefined;
-  return {
-    clientId: environment.SLACK_CLIENT_ID,
-    clientSecret: environment.SLACK_CLIENT_SECRET,
-    redirectUri: environment.SLACK_REDIRECT_URI ?? `${baseUrl}/oauth/slack/callback`,
   };
 }
 

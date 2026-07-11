@@ -1,5 +1,9 @@
+import { createHash } from 'node:crypto';
+
 import type {
   AccessExplanation,
+  AuditEvent,
+  AuditSink,
   KnowledgeObject,
   SearchRequest,
   SearchResponse,
@@ -8,21 +12,7 @@ import type {
 } from '@company-brain/domain';
 import type { CredentialVault, KnowledgePlugin } from '@company-brain/plugin-sdk';
 
-export interface AuditEvent {
-  readonly id: string;
-  readonly timestamp: string;
-  readonly requestId: string;
-  readonly subject: string;
-  readonly action: 'search' | 'get-object';
-  readonly sourceIds: readonly string[];
-  readonly outcome: 'success' | 'partial' | 'failure';
-  readonly resultCount: number;
-  readonly queryFingerprint?: string;
-}
-
-export interface AuditSink {
-  append(event: AuditEvent): Promise<void>;
-}
+export type { AuditEvent, AuditSink } from '@company-brain/domain';
 
 export class ConsoleAuditSink implements AuditSink {
   append(event: AuditEvent): Promise<void> {
@@ -151,7 +141,7 @@ export class CompanyBrainService {
     results: readonly KnowledgeObject[],
     failures: readonly SourceFailure[],
   ): Promise<void> {
-    const queryFingerprint = await fingerprint(request.query);
+    const queryFingerprint = fingerprint(request.query);
     await this.audit.append({
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -186,8 +176,6 @@ function mapPluginError(sourceId: string, error: unknown): SourceFailure {
   return failure(sourceId, 'unavailable', message);
 }
 
-async function fingerprint(value: string): Promise<string> {
-  const encoded = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
-  return Buffer.from(digest).toString('hex');
+function fingerprint(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

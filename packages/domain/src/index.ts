@@ -5,12 +5,7 @@ export type KnowledgeObjectType =
   | 'pull-request'
   | 'repository'
   | 'slack-message'
-  | 'slack-thread'
-  | 'dataset'
-  | 'table'
-  | 'dashboard'
-  | 'metric'
-  | 'semantic-model';
+  | 'slack-thread';
 
 export interface Citation {
   readonly sourceId: string;
@@ -65,4 +60,20 @@ export interface AccessExplanation {
   readonly mode: 'delegated-user';
   readonly summary: string;
   readonly requiredScopes: readonly string[];
+}
+
+export interface AuditEvent {
+  readonly id: string;
+  readonly timestamp: string;
+  readonly requestId: string;
+  readonly subject: string;
+  readonly action: 'search' | 'get-object';
+  readonly sourceIds: readonly string[];
+  readonly outcome: 'success' | 'partial' | 'failure';
+  readonly resultCount: number;
+  readonly queryFingerprint?: string;
+}
+
+export interface AuditSink {
+  append(event: AuditEvent): Promise<void>;
 }

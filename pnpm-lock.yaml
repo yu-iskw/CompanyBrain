@@ -110,9 +110,6 @@ importers:
 
   packages/persistence:
     dependencies:
-      '@company-brain/application':
-        specifier: workspace:*
-        version: link:../application
       '@company-brain/domain':
         specifier: workspace:*
         version: link:../domain

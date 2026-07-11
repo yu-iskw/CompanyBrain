@@ -9,7 +9,6 @@ export interface PluginManifest {
   readonly id: string;
   readonly displayName: string;
   readonly version: string;
-  readonly capabilities: readonly ('search' | 'get-object' | 'explain-access')[];
   readonly credentialType: 'oauth-user-token';
   readonly metadataStorage: 'non-sensitive-only';
 }
@@ -17,7 +16,6 @@ export interface PluginManifest {
 export interface PluginContext {
   readonly identity: UserIdentity;
   readonly accessToken: string;
-  readonly signal?: AbortSignal;
   readonly requestId: string;
 }
 

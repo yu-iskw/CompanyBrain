@@ -1,4 +1,5 @@
-export const webPage = `<!doctype html>
+export function webPage(nonce: string): string {
+  return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -29,7 +30,7 @@ export const webPage = `<!doctype html>
   <div class="toolbar"><span id="status">Sources are queried with your delegated identity.</span><span><a class="button" href="/oauth/slack/start">Connect Slack</a> <a class="button" href="/oauth/github/start">Connect GitHub</a></span></div>
   <section id="results" aria-live="polite"></section>
 </main>
-<script nonce="company-brain">
+<script nonce="${nonce}">
 const form = document.querySelector('#search');
 const results = document.querySelector('#results');
 const status = document.querySelector('#status');
@@ -45,3 +46,4 @@ form.addEventListener('submit', async event => {
   } catch (error) { status.textContent = 'Search failed'; results.innerHTML = '<p class="error">'+escapeHtml(error.message)+'</p>'; }
 });
 </script></body></html>`;
+}

@@ -26,19 +26,16 @@ interface SlackHistoryResponse {
   readonly messages?: readonly SlackMatch[];
 }
 
-export type SlackFetch = typeof fetch;
-
 export class SlackPlugin implements KnowledgePlugin {
   readonly manifest: PluginManifest = {
     id: 'slack',
     displayName: 'Slack',
     version: '0.1.0',
-    capabilities: ['search', 'get-object', 'explain-access'],
     credentialType: 'oauth-user-token',
     metadataStorage: 'non-sensitive-only',
   };
 
-  constructor(private readonly request: SlackFetch = fetch) {}
+  constructor(private readonly request: typeof fetch = fetch) {}
 
   explainAccess(): AccessExplanation {
     return {
@@ -91,7 +88,6 @@ export class SlackPlugin implements KnowledgePlugin {
   ): Promise<T> {
     const response = await this.request(`${SLACK_API}/${method}?${parameters.toString()}`, {
       headers: { authorization: `Bearer ${context.accessToken}` },
-      signal: context.signal,
     });
     if (!response.ok) throw new Error(`Slack HTTP ${response.status}`);
     const payload: unknown = await response.json();
