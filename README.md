@@ -48,7 +48,7 @@ set -a && source .env && set +a
 pnpm start
 ```
 
-Open <http://localhost:3000>. For the shortest development loop, set `SLACK_USER_TOKEN` and/or `GITHUB_USER_TOKEN`. Without `DATABASE_URL`, tokens remain only in the process-local credential vault.
+Open `http://localhost:3000`. For the shortest development loop, set `SLACK_USER_TOKEN` and/or `GITHUB_USER_TOKEN`. Without `DATABASE_URL`, tokens remain only in the process-local credential vault.
 
 You can also use Docker:
 

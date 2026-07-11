@@ -1,6 +1,6 @@
+import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 import { z } from 'zod';
 
 const runtime = createRuntime();
@@ -56,7 +56,7 @@ server.registerTool(
     description: 'List the source plugins available in this CompanyBrain instance.',
     inputSchema: {},
   },
-  async () => toolResult({ sources: runtime.service.listSources() }),
+  () => toolResult({ sources: runtime.service.listSources() }),
 );
 
 server.registerTool(
@@ -66,7 +66,7 @@ server.registerTool(
     description: 'Explain how CompanyBrain enforces authorization for a source.',
     inputSchema: { sourceId: z.string() },
   },
-  async ({ sourceId }) =>
+  ({ sourceId }) =>
     toolResult(runtime.service.explainAccess(sourceId) ?? { error: 'Unknown source' }),
 );
 

@@ -147,7 +147,7 @@ function asContentResponse(value: unknown): ContentResponse {
   if (typeof value !== 'object' || value === null) {
     throw new Error('GitHub content response is invalid');
   }
-  return value as ContentResponse;
+  return value;
 }
 
 function asIssueItem(value: unknown): IssueItem {

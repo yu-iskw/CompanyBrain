@@ -1,11 +1,10 @@
-import type { ServerResponse } from 'node:http';
+import { beginLinkedOAuth, finishLinkedOAuth } from './oauth-helpers.js';
 
+import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
-
-import type { OAuthClientConfig } from './config.js';
-import { beginLinkedOAuth, finishLinkedOAuth } from './oauth-helpers.js';
+import type { ServerResponse } from 'node:http';
 
 export class SlackOAuth {
   constructor(

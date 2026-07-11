@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from 'node:crypto';
-import type { IncomingMessage, ServerResponse } from 'node:http';
 
-import type { UserIdentity } from '@company-brain/domain';
-import type { OAuthStateStore, SessionStore } from '@company-brain/persistence';
+import { ClientFacingError, isAccessTokenResponse, redirect } from './oauth-helpers.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
-import { ClientFacingError, isAccessTokenResponse } from './oauth-helpers.js';
+import type { UserIdentity } from '@company-brain/domain';
+import type { OAuthStateStore, SessionStore } from '@company-brain/persistence';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 interface UserInfo {
   readonly sub: string;
@@ -143,9 +143,4 @@ function sessionCookie(sessionId: string, production: boolean): string {
 
 function clearCookie(name: string, production: boolean): string {
   return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${production ? '; Secure' : ''}`;
-}
-
-export function redirect(response: ServerResponse, location: string): void {
-  response.writeHead(302, { location });
-  response.end();
 }

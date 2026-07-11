@@ -1,15 +1,10 @@
-import type { ServerResponse } from 'node:http';
+import { beginLinkedOAuth, finishLinkedOAuth, isAccessTokenResponse } from './oauth-helpers.js';
 
+import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
-
-import type { OAuthClientConfig } from './config.js';
-import {
-  beginLinkedOAuth,
-  finishLinkedOAuth,
-  isAccessTokenResponse,
-} from './oauth-helpers.js';
+import type { ServerResponse } from 'node:http';
 
 export class GitHubOAuth {
   constructor(
@@ -66,6 +61,7 @@ async function exchangeCode(config: OAuthClientConfig, code: string): Promise<st
     }),
   });
   const value: unknown = await response.json();
-  if (!response.ok || !isAccessTokenResponse(value)) throw new Error('GitHub OAuth code exchange failed');
+  if (!response.ok || !isAccessTokenResponse(value))
+    throw new Error('GitHub OAuth code exchange failed');
   return value.access_token;
 }

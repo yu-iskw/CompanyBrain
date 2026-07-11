@@ -2,7 +2,6 @@ import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { SourceNotLinkedError, UnknownSourceError } from '@company-brain/application';
-import type { SearchRequest, UserIdentity } from '@company-brain/domain';
 import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
@@ -12,6 +11,8 @@ import { ClientFacingError } from './oauth-helpers.js';
 import { SlackOAuth } from './slack-oauth.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
+
+import type { SearchRequest, UserIdentity } from '@company-brain/domain';
 
 const config = loadConfig();
 const stores = await createStores(config);
@@ -28,16 +29,8 @@ if (config.auth.mode === 'local') {
   await seedEnvCredentials(runtime.credentials, config.auth.subject);
 }
 
-const server = createServer(async (request, response) => {
-  const requestId = readRequestId(request);
-  const nonce = randomBytes(16).toString('base64url');
-  response.setHeader('x-request-id', requestId);
-  setSecurityHeaders(response, nonce);
-  try {
-    await route(request, response, requestId, nonce);
-  } catch (error: unknown) {
-    handleError(response, error, requestId);
-  }
+const server = createServer((request, response) => {
+  void handleConnection(request, response);
 });
 
 server.listen(config.port, () => {
@@ -52,6 +45,18 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   });
 }
 
+async function handleConnection(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const requestId = readRequestId(request);
+  const nonce = randomBytes(16).toString('base64url');
+  response.setHeader('x-request-id', requestId);
+  setSecurityHeaders(response, nonce);
+  try {
+    await route(request, response, requestId, nonce);
+  } catch (error: unknown) {
+    handleError(response, error, requestId);
+  }
+}
+
 async function route(
   request: IncomingMessage,
   response: ServerResponse,
@@ -59,61 +64,111 @@ async function route(
   nonce: string,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', config.baseUrl);
-  if (request.method === 'GET' && url.pathname === '/healthz')
-    return json(response, 200, { status: 'ok' });
-  if (request.method === 'GET' && url.pathname === '/auth/login') return auth.beginLogin(response);
+  if (await handlePublicRoutes(request, response, url)) return;
+
+  const identity = await auth.authenticate(request);
+  if (!identity) {
+    return json(response, 401, { error: 'Authentication required', loginUrl: '/auth/login' });
+  }
+  if (await handleOAuthRoutes(request, response, url, identity)) return;
+  if (await handleApiRoutes(request, response, url, identity, requestId, nonce)) return;
+  json(response, 404, { error: 'Not found' });
+}
+
+async function handlePublicRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+): Promise<boolean> {
+  if (request.method === 'GET' && url.pathname === '/healthz') {
+    json(response, 200, { status: 'ok' });
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/auth/login') {
+    await auth.beginLogin(response);
+    return true;
+  }
   if (request.method === 'GET' && url.pathname === '/auth/callback') {
-    return auth.finishLogin(
+    await auth.finishLogin(
       request,
       requiredParameter(url, 'code'),
       requiredParameter(url, 'state'),
       response,
     );
+    return true;
   }
+  return false;
+}
 
-  const identity = await auth.authenticate(request);
-  if (!identity)
-    return json(response, 401, { error: 'Authentication required', loginUrl: '/auth/login' });
-  if (request.method === 'GET' && url.pathname === '/') return html(response, webPage(nonce));
+async function handleOAuthRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  identity: UserIdentity,
+): Promise<boolean> {
   if (request.method === 'GET' && url.pathname === '/oauth/slack/start') {
-    if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
-    return slackOAuth.begin(identity, response);
+    if (!slackOAuth) json(response, 503, { error: 'Slack OAuth is not configured' });
+    else await slackOAuth.begin(identity, response);
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/oauth/slack/callback') {
-    if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
-    return slackOAuth.finish(
-      identity,
-      requiredParameter(url, 'code'),
-      requiredParameter(url, 'state'),
-      response,
-    );
+    if (!slackOAuth) json(response, 503, { error: 'Slack OAuth is not configured' });
+    else {
+      await slackOAuth.finish(
+        identity,
+        requiredParameter(url, 'code'),
+        requiredParameter(url, 'state'),
+        response,
+      );
+    }
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/oauth/github/start') {
-    if (!githubOAuth) return json(response, 503, { error: 'GitHub OAuth is not configured' });
-    return githubOAuth.begin(identity, response);
+    if (!githubOAuth) json(response, 503, { error: 'GitHub OAuth is not configured' });
+    else await githubOAuth.begin(identity, response);
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/oauth/github/callback') {
-    if (!githubOAuth) return json(response, 503, { error: 'GitHub OAuth is not configured' });
-    return githubOAuth.finish(
-      identity,
-      requiredParameter(url, 'code'),
-      requiredParameter(url, 'state'),
-      response,
-    );
+    if (!githubOAuth) json(response, 503, { error: 'GitHub OAuth is not configured' });
+    else {
+      await githubOAuth.finish(
+        identity,
+        requiredParameter(url, 'code'),
+        requiredParameter(url, 'state'),
+        response,
+      );
+    }
+    return true;
+  }
+  return false;
+}
+
+async function handleApiRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  identity: UserIdentity,
+  requestId: string,
+  nonce: string,
+): Promise<boolean> {
+  if (request.method === 'GET' && url.pathname === '/') {
+    html(response, webPage(nonce));
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/sources') {
-    return listSources(response, identity);
+    await listSources(response, identity);
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/access') {
-    const sourceId = requiredParameter(url, 'sourceId');
-    const explanation = runtime.service.explainAccess(sourceId);
-    return explanation
-      ? json(response, 200, explanation)
-      : json(response, 404, { error: 'Unknown source' });
+    const explanation = runtime.service.explainAccess(requiredParameter(url, 'sourceId'));
+    if (explanation) json(response, 200, explanation);
+    else json(response, 404, { error: 'Unknown source' });
+    return true;
   }
   if (request.method === 'POST' && url.pathname === '/api/search') {
     const search = parseSearchRequest(await readJson(request));
-    return json(response, 200, await runtime.service.search(search, identity, requestId));
+    json(response, 200, await runtime.service.search(search, identity, requestId));
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/object') {
     const object = await runtime.service.getObject(
@@ -122,11 +177,11 @@ async function route(
       identity,
       requestId,
     );
-    return object
-      ? json(response, 200, object)
-      : json(response, 404, { error: 'Object not found' });
+    if (object) json(response, 200, object);
+    else json(response, 404, { error: 'Object not found' });
+    return true;
   }
-  json(response, 404, { error: 'Not found' });
+  return false;
 }
 
 async function listSources(response: ServerResponse, identity: UserIdentity): Promise<void> {
@@ -165,13 +220,13 @@ function readStringArray(value: unknown, name: string): readonly string[] {
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
+  const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
+    const part = typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk);
+    size += part.byteLength;
     if (size > 64 * 1024) throw new BadRequestError('Request body is too large');
-    chunks.push(buffer);
+    chunks.push(part);
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));

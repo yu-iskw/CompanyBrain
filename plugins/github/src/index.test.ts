@@ -48,9 +48,9 @@ describe('GitHubPlugin', () => {
 
     expect(results).toHaveLength(2);
     expect(results.map((result) => result.type)).toEqual(['file', 'issue']);
-    expect(request.mock.calls[0]?.[1]).toMatchObject({
-      headers: expect.objectContaining({ authorization: 'Bearer github-token' }),
-    });
+    const init = request.mock.calls[0]?.[1];
+    const headers = new Headers(init?.headers);
+    expect(headers.get('authorization')).toBe('Bearer github-token');
   });
 
   it('resolves a file citation without accepting an arbitrary URL', async () => {

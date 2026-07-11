@@ -1,14 +1,17 @@
 import { randomBytes } from 'node:crypto';
-import type { ServerResponse } from 'node:http';
 
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
-
-import { redirect } from './auth.js';
+import type { ServerResponse } from 'node:http';
 
 /** Client-facing OAuth/auth failures mapped to HTTP 400 by the API. */
 export class ClientFacingError extends Error {}
+
+export function redirect(response: ServerResponse, location: string): void {
+  response.writeHead(302, { location });
+  response.end();
+}
 
 export function isAccessTokenResponse(value: unknown): value is { readonly access_token: string } {
   return (
