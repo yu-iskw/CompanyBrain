@@ -1,0 +1,26 @@
+{
+  "name": "@companybrain/testing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Test fixtures and builders.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@companybrain/application": "workspace:*",
+    "@companybrain/audit": "workspace:*",
+    "@companybrain/domain": "workspace:*",
+    "@companybrain/plugin-bigquery": "workspace:*",
+    "@companybrain/plugin-github": "workspace:*",
+    "@companybrain/plugin-google-workspace": "workspace:*",
+    "@companybrain/plugin-notion": "workspace:*",
+    "@companybrain/plugin-protocol": "workspace:*",
+    "@companybrain/plugin-sdk": "workspace:*",
+    "@companybrain/plugin-slack": "workspace:*",
+    "@companybrain/policy": "workspace:*",
+    "@companybrain/retrieval": "workspace:*"
+  }
+}

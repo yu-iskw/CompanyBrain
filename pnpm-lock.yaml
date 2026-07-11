@@ -14,6 +14,9 @@ importers:
       '@trunkio/launcher':
         specifier: ^1.3.4
         version: 1.3.4
+      '@types/node':
+        specifier: ^24.13.3
+        version: 24.13.3
       '@typescript-eslint/eslint-plugin':
         specifier: ^8.59.1
         version: 8.59.1(@typescript-eslint/parser@8.59.1(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3)
@@ -55,12 +58,298 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^8.0.16
-        version: 8.0.16(jiti@2.6.1)(yaml@2.8.3)
+        version: 8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3)
       vitest:
         specifier: ^4.1.3
-        version: 4.1.3(@vitest/coverage-v8@4.1.3)(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3))
+        version: 4.1.3(@types/node@24.13.3)(@vitest/coverage-v8@4.1.3)(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3))
 
-  packages/common: {}
+  apps/api:
+    dependencies:
+      '@companybrain/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@companybrain/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
+  apps/mcp-server:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/mcp-adapter':
+        specifier: workspace:*
+        version: link:../../packages/mcp-adapter
+      '@companybrain/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@companybrain/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
+  apps/plugin-runner:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      '@companybrain/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
+  apps/worker:
+    dependencies:
+      '@companybrain/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@companybrain/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
+      '@companybrain/testing':
+        specifier: workspace:*
+        version: link:../../packages/testing
+
+  packages/a2a-adapter:
+    dependencies:
+      '@companybrain/application':
+        specifier: workspace:*
+        version: link:../application
+      '@companybrain/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@companybrain/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@companybrain/retrieval':
+        specifier: workspace:*
+        version: link:../retrieval
+      '@companybrain/testing':
+        specifier: workspace:*
+        version: link:../testing
+
+  packages/application:
+    dependencies:
+      '@companybrain/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@companybrain/authorization':
+        specifier: workspace:*
+        version: link:../authorization
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../plugin-protocol
+      '@companybrain/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@companybrain/provenance':
+        specifier: workspace:*
+        version: link:../provenance
+      '@companybrain/retrieval':
+        specifier: workspace:*
+        version: link:../retrieval
+
+  packages/audit: {}
+
+  packages/authorization:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/domain: {}
+
+  packages/indexing: {}
+
+  packages/knowledge-model:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/mcp-adapter:
+    dependencies:
+      '@companybrain/application':
+        specifier: workspace:*
+        version: link:../application
+      '@companybrain/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@companybrain/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@companybrain/retrieval':
+        specifier: workspace:*
+        version: link:../retrieval
+
+  packages/model-gateway: {}
+
+  packages/observability: {}
+
+  packages/plugin-protocol:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/plugin-sdk:
+    dependencies:
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../plugin-protocol
+
+  packages/policy:
+    dependencies:
+      '@companybrain/authorization':
+        specifier: workspace:*
+        version: link:../authorization
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/provenance:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+
+  packages/ranking: {}
+
+  packages/retrieval:
+    dependencies:
+      '@companybrain/authorization':
+        specifier: workspace:*
+        version: link:../authorization
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@companybrain/indexing':
+        specifier: workspace:*
+        version: link:../indexing
+      '@companybrain/provenance':
+        specifier: workspace:*
+        version: link:../provenance
+      '@companybrain/ranking':
+        specifier: workspace:*
+        version: link:../ranking
+
+  packages/testing:
+    dependencies:
+      '@companybrain/application':
+        specifier: workspace:*
+        version: link:../application
+      '@companybrain/audit':
+        specifier: workspace:*
+        version: link:../audit
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@companybrain/plugin-bigquery':
+        specifier: workspace:*
+        version: link:../../plugins/bigquery
+      '@companybrain/plugin-github':
+        specifier: workspace:*
+        version: link:../../plugins/github
+      '@companybrain/plugin-google-workspace':
+        specifier: workspace:*
+        version: link:../../plugins/google-workspace
+      '@companybrain/plugin-notion':
+        specifier: workspace:*
+        version: link:../../plugins/notion
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
+      '@companybrain/plugin-slack':
+        specifier: workspace:*
+        version: link:../../plugins/slack
+      '@companybrain/policy':
+        specifier: workspace:*
+        version: link:../policy
+      '@companybrain/retrieval':
+        specifier: workspace:*
+        version: link:../retrieval
+
+  plugins/bigquery:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/github:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/google-workspace:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/notion:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+
+  plugins/slack:
+    dependencies:
+      '@companybrain/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@companybrain/plugin-protocol':
+        specifier: workspace:*
+        version: link:../../packages/plugin-protocol
+      '@companybrain/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
 
 packages:
 
@@ -557,6 +846,9 @@ packages:
 
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
+
+  '@types/node@24.13.3':
+    resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
   '@typescript-eslint/eslint-plugin@8.59.1':
     resolution: {integrity: sha512-BOziFIfE+6osHO9FoJG4zjoHUcvI7fTNBSpdAwrNH0/TLvzjsk2oo8XSSOT2HhqUyhZPfHv4UOffoJ9oEEQ7Ag==}
@@ -1541,6 +1833,9 @@ packages:
     resolution: {integrity: sha512-X2wH19RAPZE3+ldGicOkoj/SIA83OIxcJ6Cuaw23hf8Xc6fQpvZXY0SftE2JgS0QhYLUG4uwodSI3R53keyh7w==}
     engines: {node: '>=14'}
 
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
   unrs-resolver@1.11.1:
     resolution: {integrity: sha512-bSjt9pjaEBnNiGgc9rUiHGKv5l4/TGzDmYw3RhnkJGtLhbnnA/5qJj7x3dNDCRx/PJxu774LlH8lCOlB4hEfKg==}
 
@@ -2020,6 +2315,10 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/node@24.13.3':
+    dependencies:
+      undici-types: 7.18.2
+
   '@typescript-eslint/eslint-plugin@8.59.1(@typescript-eslint/parser@8.59.1(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
@@ -2233,7 +2532,7 @@ snapshots:
       obug: 2.1.1
       std-env: 4.0.0
       tinyrainbow: 3.1.0
-      vitest: 4.1.3(@vitest/coverage-v8@4.1.3)(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3))
+      vitest: 4.1.3(@types/node@24.13.3)(@vitest/coverage-v8@4.1.3)(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3))
 
   '@vitest/eslint-plugin@1.6.16(@typescript-eslint/eslint-plugin@8.59.1(@typescript-eslint/parser@8.59.1(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3)(vitest@4.1.3)':
     dependencies:
@@ -2243,7 +2542,7 @@ snapshots:
     optionalDependencies:
       '@typescript-eslint/eslint-plugin': 8.59.1(@typescript-eslint/parser@8.59.1(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3))(eslint@10.3.0(jiti@2.6.1))(typescript@5.9.3)
       typescript: 5.9.3
-      vitest: 4.1.3(@vitest/coverage-v8@4.1.3)(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3))
+      vitest: 4.1.3(@types/node@24.13.3)(@vitest/coverage-v8@4.1.3)(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3))
     transitivePeerDependencies:
       - supports-color
 
@@ -2256,13 +2555,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.3(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3))':
+  '@vitest/mocker@4.1.3(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3))':
     dependencies:
       '@vitest/spy': 4.1.3
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.0.16(jiti@2.6.1)(yaml@2.8.3)
+      vite: 8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3)
 
   '@vitest/pretty-format@4.1.3':
     dependencies:
@@ -3015,6 +3314,8 @@ snapshots:
 
   unbash@2.2.0: {}
 
+  undici-types@7.18.2: {}
+
   unrs-resolver@1.11.1:
     dependencies:
       napi-postinstall: 0.3.4
@@ -3049,7 +3350,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  vite@8.0.16(jiti@2.6.1)(yaml@2.8.3):
+  vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
@@ -3057,14 +3358,15 @@ snapshots:
       rolldown: 1.0.3
       tinyglobby: 0.2.17
     optionalDependencies:
+      '@types/node': 24.13.3
       fsevents: 2.3.3
       jiti: 2.6.1
       yaml: 2.8.3
 
-  vitest@4.1.3(@vitest/coverage-v8@4.1.3)(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3)):
+  vitest@4.1.3(@types/node@24.13.3)(@vitest/coverage-v8@4.1.3)(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3)):
     dependencies:
       '@vitest/expect': 4.1.3
-      '@vitest/mocker': 4.1.3(vite@8.0.16(jiti@2.6.1)(yaml@2.8.3))
+      '@vitest/mocker': 4.1.3(vite@8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3))
       '@vitest/pretty-format': 4.1.3
       '@vitest/runner': 4.1.3
       '@vitest/snapshot': 4.1.3
@@ -3081,9 +3383,10 @@ snapshots:
       tinyexec: 1.1.1
       tinyglobby: 0.2.16
       tinyrainbow: 3.1.0
-      vite: 8.0.16(jiti@2.6.1)(yaml@2.8.3)
+      vite: 8.0.16(@types/node@24.13.3)(jiti@2.6.1)(yaml@2.8.3)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@types/node': 24.13.3
       '@vitest/coverage-v8': 4.1.3(vitest@4.1.3)
     transitivePeerDependencies:
       - msw

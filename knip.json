@@ -4,9 +4,23 @@
   "workspaces": {
     ".": {
       "entry": ["stylelint.config.mjs"],
-      "project": ["**/*.{js,cjs,mjs,ts,cts,mts}", "!packages/**", "!.trunk/**", "!node_modules/**"]
+      "project": [
+        "**/*.{js,cjs,mjs,ts,cts,mts}",
+        "!packages/**",
+        "!apps/**",
+        "!plugins/**",
+        "!.trunk/**",
+        "!node_modules/**"
+      ]
     },
     "packages/*": {
+      "project": ["src/**/*.ts"]
+    },
+    "plugins/*": {
+      "project": ["src/**/*.ts"]
+    },
+    "apps/*": {
+      "entry": ["src/main.ts"],
       "project": ["src/**/*.ts"]
     }
   }

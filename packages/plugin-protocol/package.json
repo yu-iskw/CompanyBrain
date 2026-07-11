@@ -1,0 +1,15 @@
+{
+  "name": "@companybrain/plugin-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Plugin contract: capability manifest, crawler, retriever, metadata provider, webhook handler.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@companybrain/domain": "workspace:*"
+  }
+}

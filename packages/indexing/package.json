@@ -1,0 +1,12 @@
+{
+  "name": "@companybrain/indexing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lexical (BM25) and vector indexes for hybrid search.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  }
+}
