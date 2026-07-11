@@ -1,3 +1,5 @@
+import { PluginRequestError } from '@company-brain/plugin-sdk';
+
 import type { AccessExplanation, KnowledgeObject, SearchRequest } from '@company-brain/domain';
 import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
 
@@ -89,10 +91,23 @@ export class SlackPlugin implements KnowledgePlugin {
     const response = await this.request(`${SLACK_API}/${method}?${parameters.toString()}`, {
       headers: { authorization: `Bearer ${context.accessToken}` },
     });
-    if (!response.ok) throw new Error(`Slack HTTP ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 403) throw new PluginRequestError(`Slack HTTP 403`, 'forbidden');
+      if (response.status === 429) throw new PluginRequestError(`Slack HTTP 429`, 'rate-limited');
+      throw new Error(`Slack HTTP ${response.status}`);
+    }
     const payload: unknown = await response.json();
     if (!isSlackResponse(payload)) throw new Error('Slack returned an invalid response');
-    if (!payload.ok) throw new Error(`Slack API error: ${payload.error ?? 'unknown_error'}`);
+    if (!payload.ok) {
+      const message = `Slack API error: ${payload.error ?? 'unknown_error'}`;
+      if (payload.error === 'missing_scope' || payload.error === 'not_allowed_token_type') {
+        throw new PluginRequestError(message, 'forbidden');
+      }
+      if (payload.error === 'ratelimited') {
+        throw new PluginRequestError(message, 'rate-limited');
+      }
+      throw new Error(message);
+    }
     return payload as T;
   }
 }

@@ -6,9 +6,12 @@ import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
-import { GitHubOAuth } from './github-oauth.js';
-import { ClientFacingError } from './oauth-helpers.js';
-import { SlackOAuth } from './slack-oauth.js';
+import {
+  ClientFacingError,
+  createGitHubOAuth,
+  createSlackOAuth,
+  type LinkedOAuth,
+} from './oauth-helpers.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
 
@@ -18,12 +21,14 @@ const config = loadConfig();
 const stores = await createStores(config);
 const runtime = createRuntime({ credentials: stores.credentials, audit: stores.audit });
 const auth = new Authenticator(config, stores.sessions, stores.oauthStates);
-const slackOAuth = config.slack
-  ? new SlackOAuth(config.slack, runtime.credentials, stores.oauthStates)
-  : undefined;
-const githubOAuth = config.github
-  ? new GitHubOAuth(config.github, runtime.credentials, stores.oauthStates)
-  : undefined;
+const oauthProviders: Readonly<Record<string, LinkedOAuth | undefined>> = {
+  slack: config.slack
+    ? createSlackOAuth(config.slack, runtime.credentials, stores.oauthStates)
+    : undefined,
+  github: config.github
+    ? createGitHubOAuth(config.github, runtime.credentials, stores.oauthStates)
+    : undefined,
+};
 
 if (config.auth.mode === 'local') {
   await seedEnvCredentials(runtime.credentials, config.auth.subject);
@@ -106,41 +111,28 @@ async function handleOAuthRoutes(
   url: URL,
   identity: UserIdentity,
 ): Promise<boolean> {
-  if (request.method === 'GET' && url.pathname === '/oauth/slack/start') {
-    if (!slackOAuth) json(response, 503, { error: 'Slack OAuth is not configured' });
-    else await slackOAuth.begin(identity, response);
+  if (request.method !== 'GET') return false;
+  const match = /^\/oauth\/([^/]+)\/(start|callback)$/.exec(url.pathname);
+  if (!match) return false;
+  const sourceId = match[1] ?? '';
+  const action = match[2] ?? '';
+  if (sourceId !== 'slack' && sourceId !== 'github') return false;
+  const provider = sourceId === 'slack' ? oauthProviders.slack : oauthProviders.github;
+  if (!provider) {
+    json(response, 503, { error: `${sourceId} OAuth is not configured` });
     return true;
   }
-  if (request.method === 'GET' && url.pathname === '/oauth/slack/callback') {
-    if (!slackOAuth) json(response, 503, { error: 'Slack OAuth is not configured' });
-    else {
-      await slackOAuth.finish(
-        identity,
-        requiredParameter(url, 'code'),
-        requiredParameter(url, 'state'),
-        response,
-      );
-    }
+  if (action === 'start') {
+    await provider.begin(identity, response);
     return true;
   }
-  if (request.method === 'GET' && url.pathname === '/oauth/github/start') {
-    if (!githubOAuth) json(response, 503, { error: 'GitHub OAuth is not configured' });
-    else await githubOAuth.begin(identity, response);
-    return true;
-  }
-  if (request.method === 'GET' && url.pathname === '/oauth/github/callback') {
-    if (!githubOAuth) json(response, 503, { error: 'GitHub OAuth is not configured' });
-    else {
-      await githubOAuth.finish(
-        identity,
-        requiredParameter(url, 'code'),
-        requiredParameter(url, 'state'),
-        response,
-      );
-    }
-    return true;
-  }
-  return false;
+  await provider.finish(
+    identity,
+    requiredParameter(url, 'code'),
+    requiredParameter(url, 'state'),
+    response,
+  );
+  return true;
 }
 
 async function handleApiRoutes(
@@ -201,11 +193,12 @@ function parseSearchRequest(value: unknown): SearchRequest {
     !('query' in value) ||
     typeof value.query !== 'string'
   ) {
-    throw new BadRequestError('query must be a string');
+    throw new ClientFacingError('query must be a string');
   }
   const query = value.query.trim();
-  if (query.length < 2 || query.length > 500)
-    throw new BadRequestError('query must contain 2–500 characters');
+  if (query.length < 2 || query.length > 500) {
+    throw new ClientFacingError('query must contain 2–500 characters');
+  }
   const sourceIds =
     'sourceIds' in value ? readStringArray(value.sourceIds, 'sourceIds') : undefined;
   const limit = 'limit' in value && typeof value.limit === 'number' ? value.limit : undefined;
@@ -214,7 +207,7 @@ function parseSearchRequest(value: unknown): SearchRequest {
 
 function readStringArray(value: unknown, name: string): readonly string[] {
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    throw new BadRequestError(`${name} must be an array of strings`);
+    throw new ClientFacingError(`${name} must be an array of strings`);
   }
   return value;
 }
@@ -225,19 +218,19 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const part = typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk);
     size += part.byteLength;
-    if (size > 64 * 1024) throw new BadRequestError('Request body is too large');
+    if (size > 64 * 1024) throw new ClientFacingError('Request body is too large');
     chunks.push(part);
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new BadRequestError('Request body must be valid JSON');
+    throw new ClientFacingError('Request body must be valid JSON');
   }
 }
 
 function requiredParameter(url: URL, name: string): string {
   const value = url.searchParams.get(name);
-  if (!value) throw new BadRequestError(`Missing ${name}`);
+  if (!value) throw new ClientFacingError(`Missing ${name}`);
   return value;
 }
 
@@ -267,7 +260,7 @@ function readRequestId(request: IncomingMessage): string {
 }
 
 function handleError(response: ServerResponse, error: unknown, requestId: string): void {
-  if (error instanceof BadRequestError || error instanceof ClientFacingError)
+  if (error instanceof ClientFacingError)
     return json(response, 400, { error: error.message, requestId });
   if (error instanceof UnknownSourceError)
     return json(response, 404, { error: error.message, requestId });
@@ -282,5 +275,3 @@ function handleError(response: ServerResponse, error: unknown, requestId: string
 function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
 }
-
-class BadRequestError extends Error {}

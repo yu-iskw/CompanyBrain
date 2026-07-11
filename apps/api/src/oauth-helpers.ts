@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
+import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
 import type { CredentialVault } from '@company-brain/plugin-sdk';
@@ -22,43 +23,140 @@ export function isAccessTokenResponse(value: unknown): value is { readonly acces
   );
 }
 
-export async function beginLinkedOAuth(options: {
-  readonly states: OAuthStateStore;
-  readonly flow: string;
-  readonly identity: UserIdentity;
-  readonly authorizeUrl: URL;
-  readonly response: ServerResponse;
-}): Promise<void> {
-  const state = randomBytes(24).toString('base64url');
-  await options.states.put(
-    state,
-    options.flow,
-    { subject: options.identity.subject },
-    new Date(Date.now() + 10 * 60_000),
-  );
-  options.authorizeUrl.searchParams.set('state', state);
-  redirect(options.response, options.authorizeUrl.toString());
+export class LinkedOAuth {
+  constructor(
+    private readonly sourceId: string,
+    private readonly config: OAuthClientConfig,
+    private readonly credentials: CredentialVault,
+    private readonly states: OAuthStateStore,
+    private readonly buildAuthorizeUrl: (config: OAuthClientConfig) => URL,
+    private readonly exchange: (config: OAuthClientConfig, code: string) => Promise<string>,
+  ) {}
+
+  async begin(identity: UserIdentity, response: ServerResponse): Promise<void> {
+    const state = randomBytes(24).toString('base64url');
+    await this.states.put(
+      state,
+      this.sourceId,
+      { subject: identity.subject },
+      new Date(Date.now() + 10 * 60_000),
+    );
+    const authorizeUrl = this.buildAuthorizeUrl(this.config);
+    authorizeUrl.searchParams.set('state', state);
+    redirect(response, authorizeUrl.toString());
+  }
+
+  async finish(
+    identity: UserIdentity,
+    code: string,
+    state: string,
+    response: ServerResponse,
+  ): Promise<void> {
+    const pending = await this.states.take(state, this.sourceId);
+    if (!pending?.subject) {
+      throw new ClientFacingError(`Invalid or expired ${this.sourceId} OAuth state`);
+    }
+    if (pending.subject !== identity.subject) {
+      throw new ClientFacingError('OAuth state does not match the authenticated user');
+    }
+    const token = await this.exchange(this.config, code);
+    await this.credentials.put(identity.subject, this.sourceId, token);
+    redirect(response, `/?linked=${this.sourceId}`);
+  }
 }
 
-export async function finishLinkedOAuth(options: {
-  readonly states: OAuthStateStore;
-  readonly credentials: CredentialVault;
-  readonly identity: UserIdentity;
-  readonly flow: string;
-  readonly sourceId: string;
-  readonly code: string;
-  readonly state: string;
-  readonly exchange: (code: string) => Promise<string>;
-  readonly response: ServerResponse;
-}): Promise<void> {
-  const pending = await options.states.take(options.state, options.flow);
-  if (!pending?.subject) {
-    throw new ClientFacingError(`Invalid or expired ${options.sourceId} OAuth state`);
+export function createSlackOAuth(
+  config: OAuthClientConfig,
+  credentials: CredentialVault,
+  states: OAuthStateStore,
+): LinkedOAuth {
+  return new LinkedOAuth(
+    'slack',
+    config,
+    credentials,
+    states,
+    (oauth) => {
+      const url = new URL('https://slack.com/oauth/v2/authorize');
+      url.search = new URLSearchParams({
+        client_id: oauth.clientId,
+        redirect_uri: oauth.redirectUri,
+        user_scope: 'search:read,channels:history,groups:history,im:history,mpim:history',
+      }).toString();
+      return url;
+    },
+    exchangeSlackCode,
+  );
+}
+
+export function createGitHubOAuth(
+  config: OAuthClientConfig,
+  credentials: CredentialVault,
+  states: OAuthStateStore,
+): LinkedOAuth {
+  return new LinkedOAuth(
+    'github',
+    config,
+    credentials,
+    states,
+    (oauth) => {
+      const url = new URL('https://github.com/login/oauth/authorize');
+      url.search = new URLSearchParams({
+        client_id: oauth.clientId,
+        redirect_uri: oauth.redirectUri,
+        scope: 'repo read:org read:user',
+      }).toString();
+      return url;
+    },
+    exchangeGitHubCode,
+  );
+}
+
+async function exchangeGitHubCode(config: OAuthClientConfig, code: string): Promise<string> {
+  const response = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+      code,
+      redirect_uri: config.redirectUri,
+    }),
+  });
+  const value: unknown = await response.json();
+  if (!response.ok || !isAccessTokenResponse(value)) {
+    throw new Error('GitHub OAuth code exchange failed');
   }
-  if (pending.subject !== options.identity.subject) {
-    throw new ClientFacingError('OAuth state does not match the authenticated user');
+  return value.access_token;
+}
+
+async function exchangeSlackCode(config: OAuthClientConfig, code: string): Promise<string> {
+  const response = await fetch('https://slack.com/api/oauth.v2.access', {
+    method: 'POST',
+    headers: {
+      authorization: `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64')}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({ code, redirect_uri: config.redirectUri }),
+  });
+  const value: unknown = await response.json();
+  if (!response.ok || !isSlackTokenResponse(value)) {
+    throw new Error('Slack OAuth code exchange failed or did not return a delegated user token');
   }
-  const token = await options.exchange(options.code);
-  await options.credentials.put(options.identity.subject, options.sourceId, token);
-  redirect(options.response, `/?linked=${options.sourceId}`);
+  return value.authed_user.access_token;
+}
+
+function isSlackTokenResponse(
+  value: unknown,
+): value is { readonly ok: true; readonly authed_user: { readonly access_token: string } } {
+  if (typeof value !== 'object' || value === null || !('ok' in value) || value.ok !== true) {
+    return false;
+  }
+  if (
+    !('authed_user' in value) ||
+    typeof value.authed_user !== 'object' ||
+    value.authed_user === null
+  ) {
+    return false;
+  }
+  return 'access_token' in value.authed_user && typeof value.authed_user.access_token === 'string';
 }

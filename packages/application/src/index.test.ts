@@ -1,4 +1,8 @@
-import { InMemoryCredentialVault, type KnowledgePlugin } from '@company-brain/plugin-sdk';
+import {
+  InMemoryCredentialVault,
+  PluginRequestError,
+  type KnowledgePlugin,
+} from '@company-brain/plugin-sdk';
 import { describe, expect, it } from 'vitest';
 
 import { CompanyBrainService, PluginRegistry, type AuditEvent, type AuditSink } from './index.js';
@@ -120,9 +124,9 @@ describe('CompanyBrainService', () => {
   });
 
   it('maps source failures without failing the whole search', async () => {
-    const makeFailingService = async (message: string): Promise<CompanyBrainService> => {
+    const makeFailingService = async (error: Error): Promise<CompanyBrainService> => {
       const registry = new PluginRegistry();
-      registry.register({ ...plugin, search: () => Promise.reject(new Error(message)) });
+      registry.register({ ...plugin, search: () => Promise.reject(error) });
       const credentials = new InMemoryCredentialVault();
       await credentials.put('alice', 'test', 'token');
       return new CompanyBrainService(registry, credentials, new MemoryAuditSink());
@@ -131,21 +135,21 @@ describe('CompanyBrainService', () => {
     expect(
       (
         await (
-          await makeFailingService('HTTP 429 rate limit')
+          await makeFailingService(new PluginRequestError('rate limited', 'rate-limited'))
         ).search({ query: 'x' }, { subject: 'alice' })
       ).failures[0]?.code,
     ).toBe('rate-limited');
     expect(
       (
         await (
-          await makeFailingService('missing_scope')
+          await makeFailingService(new PluginRequestError('missing scope', 'forbidden'))
         ).search({ query: 'x' }, { subject: 'alice' })
       ).failures[0]?.code,
     ).toBe('forbidden');
     expect(
       (
         await (
-          await makeFailingService('network down')
+          await makeFailingService(new Error('network down'))
         ).search({ query: 'x' }, { subject: 'alice' })
       ).failures[0]?.code,
     ).toBe('unavailable');

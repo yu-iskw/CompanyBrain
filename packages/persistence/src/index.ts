@@ -69,12 +69,12 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
 
   take(state: string, flow: string): Promise<Readonly<Record<string, string>> | undefined> {
     const stored = this.#states.get(state);
-    if (!stored || stored.flow !== flow || stored.expiresAt.getTime() <= Date.now()) {
-      if (stored?.expiresAt.getTime() && stored.expiresAt.getTime() <= Date.now()) {
-        this.#states.delete(state);
-      }
+    if (!stored) return Promise.resolve(undefined);
+    if (stored.expiresAt.getTime() <= Date.now()) {
+      this.#states.delete(state);
       return Promise.resolve(undefined);
     }
+    if (stored.flow !== flow) return Promise.resolve(undefined);
     this.#states.delete(state);
     return Promise.resolve(stored.payload);
   }

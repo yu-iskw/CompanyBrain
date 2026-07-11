@@ -1,5 +1,11 @@
 import { createHash } from 'node:crypto';
 
+import {
+  PluginRequestError,
+  type CredentialVault,
+  type KnowledgePlugin,
+} from '@company-brain/plugin-sdk';
+
 import type {
   AccessExplanation,
   AuditEvent,
@@ -10,7 +16,6 @@ import type {
   SourceFailure,
   UserIdentity,
 } from '@company-brain/domain';
-import type { CredentialVault, KnowledgePlugin } from '@company-brain/plugin-sdk';
 
 export type { AuditEvent, AuditSink } from '@company-brain/domain';
 
@@ -64,12 +69,15 @@ export class CompanyBrainService {
     requestId: string = crypto.randomUUID(),
   ): Promise<SearchResponse> {
     const plugins = this.selectPlugins(request.sourceIds);
+    const limit = normalizeLimit(request.limit);
+    const perPluginLimit = Math.max(1, Math.ceil(limit / Math.max(1, plugins.length)));
+    const boundedRequest = { ...request, limit: perPluginLimit };
     const outcomes = await Promise.all(
-      plugins.map(async (plugin) => this.searchPlugin(plugin, request, identity, requestId)),
+      plugins.map(async (plugin) => this.searchPlugin(plugin, boundedRequest, identity, requestId)),
     );
     const results = outcomes.flatMap((outcome) => outcome.results);
     const failures = outcomes.flatMap((outcome) => outcome.failures);
-    const limited = results.slice(0, normalizeLimit(request.limit));
+    const limited = results.slice(0, limit);
     await this.writeSearchAudit(request, identity, requestId, plugins, limited, failures);
     return {
       query: request.query,
@@ -169,10 +177,10 @@ function failure(sourceId: string, code: SourceFailure['code'], message: string)
 }
 
 function mapPluginError(sourceId: string, error: unknown): SourceFailure {
+  if (error instanceof PluginRequestError) {
+    return failure(sourceId, error.code, error.message);
+  }
   const message = error instanceof Error ? error.message : 'Source search failed';
-  if (/rate.?limit|429/i.test(message)) return failure(sourceId, 'rate-limited', message);
-  if (/forbidden|not_allowed|missing_scope|403/i.test(message))
-    return failure(sourceId, 'forbidden', message);
   return failure(sourceId, 'unavailable', message);
 }
 

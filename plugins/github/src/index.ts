@@ -1,3 +1,5 @@
+import { PluginRequestError } from '@company-brain/plugin-sdk';
+
 import type {
   AccessExplanation,
   KnowledgeObject,
@@ -126,7 +128,11 @@ export class GitHubPlugin implements KnowledgePlugin {
         'x-github-api-version': '2026-03-10',
       },
     });
-    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 403) throw new PluginRequestError(`GitHub HTTP 403`, 'forbidden');
+      if (response.status === 429) throw new PluginRequestError(`GitHub HTTP 429`, 'rate-limited');
+      throw new Error(`GitHub HTTP ${response.status}`);
+    }
     return response.json();
   }
 }
@@ -298,7 +304,11 @@ function encodePath(path: string): string {
 }
 
 function decodeContent(content: string): string {
-  return Buffer.from(content.replace(/\s/g, ''), 'base64').toString('utf8');
+  const compact = content.replace(/\s/g, '');
+  // Decode only enough base64 for a ~2k character UTF-8 excerpt (worst-case 4 bytes/char).
+  const maxBase64Chars = Math.ceil((2_000 * 4 * 4) / 3) + 4;
+  const sliced = compact.length <= maxBase64Chars ? compact : compact.slice(0, maxBase64Chars);
+  return truncate(Buffer.from(sliced, 'base64').toString('utf8'));
 }
 
 function truncate(value: string): string {

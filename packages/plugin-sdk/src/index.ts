@@ -2,6 +2,7 @@ import type {
   AccessExplanation,
   KnowledgeObject,
   SearchRequest,
+  SourceFailure,
   UserIdentity,
 } from '@company-brain/domain';
 
@@ -30,6 +31,16 @@ export interface CredentialVault {
   get(subject: string, sourceId: string): Promise<string | undefined>;
   put(subject: string, sourceId: string, accessToken: string): Promise<void>;
   delete(subject: string, sourceId: string): Promise<void>;
+}
+
+export class PluginRequestError extends Error {
+  constructor(
+    message: string,
+    readonly code: SourceFailure['code'],
+  ) {
+    super(message);
+    this.name = 'PluginRequestError';
+  }
 }
 
 export class InMemoryCredentialVault implements CredentialVault {
