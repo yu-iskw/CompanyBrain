@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { ClientFacingError, isAccessTokenResponse, redirect } from './http.js';
+import { ClientFacingError, readAccessToken, redirect, UpstreamServiceError } from './http.js';
 
 import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -115,11 +115,7 @@ export async function exchangeGitHubCode(config: OAuthClientConfig, code: string
       redirect_uri: config.redirectUri,
     }),
   });
-  const value: unknown = await response.json();
-  if (!response.ok || !isAccessTokenResponse(value)) {
-    throw new ClientFacingError('GitHub OAuth code exchange failed');
-  }
-  return value.access_token;
+  return readAccessToken(response, 'GitHub OAuth code exchange failed');
 }
 
 export async function exchangeSlackCode(config: OAuthClientConfig, code: string): Promise<string> {
@@ -133,7 +129,7 @@ export async function exchangeSlackCode(config: OAuthClientConfig, code: string)
   });
   const value: unknown = await response.json();
   if (!response.ok || !isSlackTokenResponse(value)) {
-    throw new ClientFacingError(
+    throw new UpstreamServiceError(
       'Slack OAuth code exchange failed or did not return a delegated user token',
     );
   }

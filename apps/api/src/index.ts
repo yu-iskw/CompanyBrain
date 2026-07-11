@@ -7,7 +7,7 @@ import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
-import { ClientFacingError, AuthenticationError } from './http.js';
+import { AuthenticationError, ClientFacingError, UpstreamServiceError } from './http.js';
 import {
   buildOAuthProviders,
   exchangeGitHubCode,
@@ -291,16 +291,13 @@ function handleError(response: ServerResponse, error: unknown, requestId: string
     return json(response, 400, { error: error.message, requestId });
   if (error instanceof AuthenticationError)
     return json(response, 401, { error: error.message, requestId });
+  if (error instanceof UpstreamServiceError)
+    return json(response, 502, { error: error.message, requestId });
   if (error instanceof PluginRequestError) {
-    const status =
-      error.code === 'invalid-request'
-        ? 400
-        : error.code === 'forbidden'
-          ? 403
-          : error.code === 'rate-limited'
-            ? 429
-            : 502;
-    return json(response, status, { error: error.message, requestId });
+    return json(response, pluginRequestStatus(error.code), {
+      error: error.message,
+      requestId,
+    });
   }
   if (error instanceof UnknownSourceError)
     return json(response, 404, { error: error.message, requestId });
@@ -310,6 +307,23 @@ function handleError(response: ServerResponse, error: unknown, requestId: string
     `${JSON.stringify({ type: 'company-brain.error', requestId, message: safeMessage(error) })}\n`,
   );
   json(response, 500, { error: 'Internal server error', requestId });
+}
+
+function pluginRequestStatus(code: PluginRequestError['code']): number {
+  switch (code) {
+    case 'invalid-request':
+      return 400;
+    case 'forbidden':
+      return 403;
+    case 'rate-limited':
+      return 429;
+    case 'unavailable':
+      return 502;
+    default: {
+      const _exhaustive: never = code;
+      return _exhaustive;
+    }
+  }
 }
 
 function safeMessage(error: unknown): string {

@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { AuthenticationError, ClientFacingError, isAccessTokenResponse, redirect } from './http.js';
+import { AuthenticationError, ClientFacingError, readAccessToken, redirect } from './http.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -136,11 +136,7 @@ async function exchangeOidcCode(
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
-  const value: unknown = await response.json();
-  if (!response.ok || !isAccessTokenResponse(value)) {
-    throw new ClientFacingError('OIDC code exchange failed');
-  }
-  return value.access_token;
+  return readAccessToken(response, 'OIDC code exchange failed');
 }
 
 function sessionCookie(sessionId: string, production: boolean): string {

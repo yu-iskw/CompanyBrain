@@ -152,8 +152,12 @@ describe('CompanyBrainService', () => {
         await (
           await makeFailingService(new Error('network down'))
         ).search({ query: 'x' }, { subject: 'alice' })
-      ).failures[0]?.code,
-    ).toBe('unavailable');
+      ).failures[0],
+    ).toEqual({
+      sourceId: 'test',
+      code: 'unavailable',
+      message: 'Source search failed',
+    });
   });
 
   it('rejects unknown and unlinked object sources', async () => {

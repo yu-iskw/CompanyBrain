@@ -70,7 +70,9 @@ export class SlackPlugin implements KnowledgePlugin {
       new URLSearchParams({ query: search.query, count: String(limit), sort: 'score' }),
       context,
     );
-    return (response.messages?.matches ?? []).map((match) => toKnowledgeObject(match));
+    return (response.messages?.matches ?? [])
+      .slice(0, limit)
+      .map((match) => toKnowledgeObject(match));
   }
 
   async getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined> {

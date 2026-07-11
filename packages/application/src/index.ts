@@ -98,30 +98,22 @@ export class CompanyBrainService {
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
     if (!token) throw new SourceNotLinkedError(sourceId);
-    try {
-      const result = await plugin.getObject(objectId, {
-        identity,
-        accessToken: token,
-        requestId,
-      });
-      await this.audit.append({
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        requestId,
-        subject: identity.subject,
-        action: 'get-object',
-        sourceIds: [sourceId],
-        outcome: result ? 'success' : 'failure',
-        resultCount: result ? 1 : 0,
-      });
-      return result;
-    } catch (error: unknown) {
-      if (error instanceof PluginRequestError) throw error;
-      if (error instanceof Error && /invalid .*object id/i.test(error.message)) {
-        throw new PluginRequestError(error.message, 'invalid-request');
-      }
-      throw error;
-    }
+    const result = await plugin.getObject(objectId, {
+      identity,
+      accessToken: token,
+      requestId,
+    });
+    await this.audit.append({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      requestId,
+      subject: identity.subject,
+      action: 'get-object',
+      sourceIds: [sourceId],
+      outcome: result ? 'success' : 'failure',
+      resultCount: result ? 1 : 0,
+    });
+    return result;
   }
 
   private selectPlugins(sourceIds?: readonly string[]): readonly KnowledgePlugin[] {
