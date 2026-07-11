@@ -1,0 +1,15 @@
+{
+  "name": "@companybrain/authorization",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Permission-aware access decisions derived from source-system ACLs.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@companybrain/domain": "workspace:*"
+  }
+}

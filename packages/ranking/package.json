@@ -1,0 +1,12 @@
+{
+  "name": "@companybrain/ranking",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Rank fusion and reranking.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  }
+}

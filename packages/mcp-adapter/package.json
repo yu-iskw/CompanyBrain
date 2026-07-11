@@ -1,0 +1,19 @@
+{
+  "name": "@companybrain/mcp-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP tools: search, get_object, resolve_citation, list_sources, explain_access.",
+  "license": "Apache-2.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@companybrain/application": "workspace:*",
+    "@companybrain/audit": "workspace:*",
+    "@companybrain/domain": "workspace:*",
+    "@companybrain/policy": "workspace:*",
+    "@companybrain/retrieval": "workspace:*"
+  }
+}
