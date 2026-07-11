@@ -17,7 +17,7 @@ export function isAccessTokenResponse(value: unknown): value is { readonly acces
   );
 }
 
-export class LinkedOAuth {
+class LinkedOAuth {
   constructor(
     readonly sourceId: string,
     private readonly config: OAuthClientConfig,
@@ -59,7 +59,7 @@ export class LinkedOAuth {
   }
 }
 
-export interface OAuthProviderDefinition {
+interface OAuthProviderDefinition {
   readonly id: string;
   readonly config?: OAuthClientConfig;
   readonly create: (
