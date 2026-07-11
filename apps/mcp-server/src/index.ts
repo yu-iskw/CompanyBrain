@@ -1,16 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createRuntime } from '@company-brain/runtime';
+import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 import { z } from 'zod';
 
 const runtime = createRuntime();
 const identity = { subject: process.env.COMPANY_BRAIN_SUBJECT ?? 'local-mcp-user' };
-if (process.env.SLACK_USER_TOKEN) {
-  await runtime.credentials.put(identity.subject, 'slack', process.env.SLACK_USER_TOKEN);
-}
-if (process.env.GITHUB_USER_TOKEN) {
-  await runtime.credentials.put(identity.subject, 'github', process.env.GITHUB_USER_TOKEN);
-}
+await seedEnvCredentials(runtime.credentials, identity.subject);
 
 const server = new McpServer({ name: 'company-brain', version: '0.1.0' });
 
@@ -29,6 +24,11 @@ server.registerTool(
     toolResult(await runtime.service.search({ query, sourceIds, limit }, identity)),
 );
 
+async function fetchObject(sourceId: string, objectId: string, missing: string) {
+  const object = await runtime.service.getObject(sourceId, objectId, identity);
+  return toolResult(object ?? { error: missing });
+}
+
 server.registerTool(
   'get_object',
   {
@@ -36,10 +36,7 @@ server.registerTool(
     description: 'Fetch an object live from its source using delegated user permissions.',
     inputSchema: { sourceId: z.string(), objectId: z.string() },
   },
-  async ({ sourceId, objectId }) => {
-    const object = await runtime.service.getObject(sourceId, objectId, identity);
-    return toolResult(object ?? { error: 'Object not found' });
-  },
+  async ({ sourceId, objectId }) => fetchObject(sourceId, objectId, 'Object not found'),
 );
 
 server.registerTool(
@@ -49,10 +46,7 @@ server.registerTool(
     description: 'Resolve a CompanyBrain citation by fetching its current source object.',
     inputSchema: { sourceId: z.string(), objectId: z.string() },
   },
-  async ({ sourceId, objectId }) => {
-    const object = await runtime.service.getObject(sourceId, objectId, identity);
-    return toolResult(object ?? { error: 'Citation target not found' });
-  },
+  async ({ sourceId, objectId }) => fetchObject(sourceId, objectId, 'Citation target not found'),
 );
 
 server.registerTool(
