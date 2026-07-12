@@ -1,107 +1,187 @@
+import { randomBytes } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { SourceNotLinkedError, UnknownSourceError } from '@company-brain/application';
-import type { SearchRequest, UserIdentity } from '@company-brain/domain';
-import { createRuntime } from '@company-brain/runtime';
+import { PluginRequestError } from '@company-brain/plugin-sdk';
+import { createRuntime, seedEnvCredentials } from '@company-brain/runtime';
 
 import { Authenticator } from './auth.js';
 import { loadConfig } from './config.js';
-import { GitHubOAuth } from './github-oauth.js';
-import { SlackOAuth } from './slack-oauth.js';
+import { AuthenticationError, ClientFacingError, UpstreamServiceError } from './http.js';
+import {
+  buildOAuthProviders,
+  exchangeGitHubCode,
+  exchangeSlackCode,
+  githubAuthorizeUrl,
+  slackAuthorizeUrl,
+} from './oauth-helpers.js';
 import { createStores } from './stores.js';
 import { webPage } from './web.js';
+
+import type { SearchRequest, UserIdentity } from '@company-brain/domain';
 
 const config = loadConfig();
 const stores = await createStores(config);
 const runtime = createRuntime({ credentials: stores.credentials, audit: stores.audit });
 const auth = new Authenticator(config, stores.sessions, stores.oauthStates);
-const slackOAuth = config.slack
-  ? new SlackOAuth(config.slack, runtime.credentials, stores.oauthStates)
-  : undefined;
-const githubOAuth = config.github
-  ? new GitHubOAuth(config.github, runtime.credentials, stores.oauthStates)
-  : undefined;
+const { knownSources: knownOAuthSources, providers: oauthProviders } = buildOAuthProviders(
+  [
+    {
+      id: 'slack',
+      config: config.slack,
+      buildAuthorizeUrl: slackAuthorizeUrl,
+      exchange: exchangeSlackCode,
+    },
+    {
+      id: 'github',
+      config: config.github,
+      buildAuthorizeUrl: githubAuthorizeUrl,
+      exchange: exchangeGitHubCode,
+    },
+  ],
+  runtime.credentials,
+  stores.oauthStates,
+);
 
-if (config.auth.mode === 'local' && process.env.SLACK_USER_TOKEN) {
-  await runtime.credentials.put(config.auth.subject, 'slack', process.env.SLACK_USER_TOKEN);
-}
-if (config.auth.mode === 'local' && process.env.GITHUB_USER_TOKEN) {
-  await runtime.credentials.put(config.auth.subject, 'github', process.env.GITHUB_USER_TOKEN);
+if (config.auth.mode === 'local') {
+  await seedEnvCredentials(runtime.credentials, config.auth.subject);
 }
 
-const server = createServer(async (request, response) => {
-  const requestId = readRequestId(request);
-  response.setHeader('x-request-id', requestId);
-  setSecurityHeaders(response);
-  try {
-    await route(request, response, requestId);
-  } catch (error: unknown) {
-    handleError(response, error, requestId);
-  }
+const server = createServer((request, response) => {
+  void handleConnection(request, response);
 });
 
 server.listen(config.port, () => {
   process.stdout.write(`CompanyBrain listening on ${config.baseUrl}\n`);
 });
 
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    server.close(() => {
+      void stores.close().finally(() => process.exit(0));
+    });
+  });
+}
+
+async function handleConnection(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const requestId = readRequestId(request);
+  const nonce = randomBytes(16).toString('base64url');
+  response.setHeader('x-request-id', requestId);
+  setSecurityHeaders(response, nonce);
+  try {
+    await route(request, response, requestId, nonce);
+  } catch (error: unknown) {
+    handleError(response, error, requestId);
+  }
+}
+
 async function route(
   request: IncomingMessage,
   response: ServerResponse,
   requestId: string,
+  nonce: string,
 ): Promise<void> {
   const url = new URL(request.url ?? '/', config.baseUrl);
-  if (request.method === 'GET' && url.pathname === '/healthz')
-    return json(response, 200, { status: 'ok' });
-  if (request.method === 'GET' && url.pathname === '/auth/login') return auth.beginLogin(response);
-  if (request.method === 'GET' && url.pathname === '/auth/callback') {
-    return auth.finishLogin(
-      requiredParameter(url, 'code'),
-      requiredParameter(url, 'state'),
-      response,
-    );
-  }
+  if (await handlePublicRoutes(request, response, url)) return;
 
   const identity = await auth.authenticate(request);
-  if (!identity)
+  if (!identity) {
     return json(response, 401, { error: 'Authentication required', loginUrl: '/auth/login' });
-  if (request.method === 'GET' && url.pathname === '/') return html(response, webPage);
-  if (request.method === 'GET' && url.pathname === '/oauth/slack/start') {
-    if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
-    return slackOAuth.begin(identity, response);
   }
-  if (request.method === 'GET' && url.pathname === '/oauth/slack/callback') {
-    if (!slackOAuth) return json(response, 503, { error: 'Slack OAuth is not configured' });
-    return slackOAuth.finish(
+  if (await handleOAuthRoutes(request, response, url, identity)) return;
+  if (await handleApiRoutes(request, response, url, identity, requestId, nonce)) return;
+  json(response, 404, { error: 'Not found' });
+}
+
+async function handlePublicRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+): Promise<boolean> {
+  if (request.method === 'GET' && url.pathname === '/healthz') {
+    json(response, 200, { status: 'ok' });
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/auth/login') {
+    if (config.auth.mode !== 'oidc') {
+      json(response, 404, { error: 'OIDC authentication is not configured' });
+      return true;
+    }
+    await auth.beginLogin(response);
+    return true;
+  }
+  if (request.method === 'GET' && url.pathname === '/auth/callback') {
+    if (config.auth.mode !== 'oidc') {
+      json(response, 404, { error: 'OIDC authentication is not configured' });
+      return true;
+    }
+    await auth.finishLogin(
+      request,
       requiredParameter(url, 'code'),
       requiredParameter(url, 'state'),
       response,
     );
+    return true;
   }
-  if (request.method === 'GET' && url.pathname === '/oauth/github/start') {
-    if (!githubOAuth) return json(response, 503, { error: 'GitHub OAuth is not configured' });
-    return githubOAuth.begin(identity, response);
+  return false;
+}
+
+async function handleOAuthRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  identity: UserIdentity,
+): Promise<boolean> {
+  if (request.method !== 'GET') return false;
+  const match = /^\/oauth\/([^/]+)\/(start|callback)$/.exec(url.pathname);
+  if (!match?.[1] || !match[2]) return false;
+  const sourceId = match[1];
+  const action = match[2];
+  if (!knownOAuthSources.has(sourceId)) return false;
+  const provider = oauthProviders.get(sourceId);
+  if (!provider) {
+    json(response, 503, { error: `${sourceId} OAuth is not configured` });
+    return true;
   }
-  if (request.method === 'GET' && url.pathname === '/oauth/github/callback') {
-    if (!githubOAuth) return json(response, 503, { error: 'GitHub OAuth is not configured' });
-    return githubOAuth.finish(
-      requiredParameter(url, 'code'),
-      requiredParameter(url, 'state'),
-      response,
-    );
+  if (action === 'start') {
+    await provider.begin(identity, response);
+    return true;
+  }
+  await provider.finish(
+    identity,
+    requiredParameter(url, 'code'),
+    requiredParameter(url, 'state'),
+    response,
+  );
+  return true;
+}
+
+async function handleApiRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  url: URL,
+  identity: UserIdentity,
+  requestId: string,
+  nonce: string,
+): Promise<boolean> {
+  if (request.method === 'GET' && url.pathname === '/') {
+    html(response, webPage(nonce));
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/sources') {
-    return listSources(response, identity);
+    await listSources(response, identity);
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/access') {
-    const sourceId = requiredParameter(url, 'sourceId');
-    const explanation = runtime.service.explainAccess(sourceId);
-    return explanation
-      ? json(response, 200, explanation)
-      : json(response, 404, { error: 'Unknown source' });
+    const explanation = runtime.service.explainAccess(requiredParameter(url, 'sourceId'));
+    if (explanation) json(response, 200, explanation);
+    else json(response, 404, { error: 'Unknown source' });
+    return true;
   }
   if (request.method === 'POST' && url.pathname === '/api/search') {
     const search = parseSearchRequest(await readJson(request));
-    return json(response, 200, await runtime.service.search(search, identity, requestId));
+    json(response, 200, await runtime.service.search(search, identity, requestId));
+    return true;
   }
   if (request.method === 'GET' && url.pathname === '/api/object') {
     const object = await runtime.service.getObject(
@@ -110,11 +190,11 @@ async function route(
       identity,
       requestId,
     );
-    return object
-      ? json(response, 200, object)
-      : json(response, 404, { error: 'Object not found' });
+    if (object) json(response, 200, object);
+    else json(response, 404, { error: 'Object not found' });
+    return true;
   }
-  json(response, 404, { error: 'Not found' });
+  return false;
 }
 
 async function listSources(response: ServerResponse, identity: UserIdentity): Promise<void> {
@@ -134,60 +214,73 @@ function parseSearchRequest(value: unknown): SearchRequest {
     !('query' in value) ||
     typeof value.query !== 'string'
   ) {
-    throw new BadRequestError('query must be a string');
+    throw new ClientFacingError('query must be a string');
   }
   const query = value.query.trim();
-  if (query.length < 2 || query.length > 500)
-    throw new BadRequestError('query must contain 2–500 characters');
+  if (query.length < 2 || query.length > 500) {
+    throw new ClientFacingError('query must contain 2–500 characters');
+  }
   const sourceIds =
     'sourceIds' in value ? readStringArray(value.sourceIds, 'sourceIds') : undefined;
-  const limit = 'limit' in value && typeof value.limit === 'number' ? value.limit : undefined;
+  const limit =
+    'limit' in value && typeof value.limit === 'number' && Number.isFinite(value.limit)
+      ? value.limit
+      : undefined;
+  if ('limit' in value && value.limit !== undefined && limit === undefined) {
+    throw new ClientFacingError('limit must be a finite number');
+  }
   return { query, sourceIds, limit };
 }
 
 function readStringArray(value: unknown, name: string): readonly string[] {
   if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) {
-    throw new BadRequestError(`${name} must be an array of strings`);
+    throw new ClientFacingError(`${name} must be an array of strings`);
   }
   return value;
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
-  const chunks: Buffer[] = [];
+  const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > 64 * 1024) throw new BadRequestError('Request body is too large');
-    chunks.push(buffer);
+    const part = typeof chunk === 'string' ? Buffer.from(chunk) : new Uint8Array(chunk);
+    size += part.byteLength;
+    if (size > 64 * 1024) throw new ClientFacingError('Request body is too large');
+    chunks.push(part);
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   } catch {
-    throw new BadRequestError('Request body must be valid JSON');
+    throw new ClientFacingError('Request body must be valid JSON');
   }
 }
 
 function requiredParameter(url: URL, name: string): string {
   const value = url.searchParams.get(name);
-  if (!value) throw new BadRequestError(`Missing ${name}`);
+  if (!value) throw new ClientFacingError(`Missing ${name}`);
   return value;
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'private, no-store',
+  });
   response.end(JSON.stringify(value));
 }
 
 function html(response: ServerResponse, value: string): void {
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'private, no-store',
+  });
   response.end(value);
 }
 
-function setSecurityHeaders(response: ServerResponse): void {
+function setSecurityHeaders(response: ServerResponse, nonce: string): void {
   response.setHeader(
     'content-security-policy',
-    "default-src 'self'; script-src 'nonce-company-brain'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+    `default-src 'self'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`,
   );
   response.setHeader('referrer-policy', 'no-referrer');
   response.setHeader('x-content-type-options', 'nosniff');
@@ -200,8 +293,18 @@ function readRequestId(request: IncomingMessage): string {
 }
 
 function handleError(response: ServerResponse, error: unknown, requestId: string): void {
-  if (error instanceof BadRequestError)
+  if (error instanceof ClientFacingError)
     return json(response, 400, { error: error.message, requestId });
+  if (error instanceof AuthenticationError)
+    return json(response, 401, { error: error.message, requestId });
+  if (error instanceof UpstreamServiceError)
+    return json(response, 502, { error: error.message, requestId });
+  if (error instanceof PluginRequestError) {
+    return json(response, pluginRequestStatus(error.code), {
+      error: error.message,
+      requestId,
+    });
+  }
   if (error instanceof UnknownSourceError)
     return json(response, 404, { error: error.message, requestId });
   if (error instanceof SourceNotLinkedError)
@@ -212,8 +315,23 @@ function handleError(response: ServerResponse, error: unknown, requestId: string
   json(response, 500, { error: 'Internal server error', requestId });
 }
 
+function pluginRequestStatus(code: PluginRequestError['code']): number {
+  switch (code) {
+    case 'invalid-request':
+      return 400;
+    case 'forbidden':
+      return 403;
+    case 'rate-limited':
+      return 429;
+    case 'unavailable':
+      return 502;
+    default: {
+      const _exhaustive: never = code;
+      return _exhaustive;
+    }
+  }
+}
+
 function safeMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'Unknown error';
 }
-
-class BadRequestError extends Error {}

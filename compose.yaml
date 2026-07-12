@@ -2,7 +2,7 @@ services:
   company-brain:
     build: .
     ports:
-      - '3000:3000'
+      - 3000:3000
     environment:
       AUTH_MODE: local
       BASE_URL: http://localhost:3000
@@ -31,7 +31,7 @@ services:
       POSTGRES_PASSWORD: company_brain
       POSTGRES_USER: company_brain
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U company_brain']
+      test: [CMD-SHELL, pg_isready -U company_brain]
       interval: 3s
       timeout: 3s
       retries: 10

@@ -15,7 +15,6 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@company-brain/application": "workspace:*",
     "@company-brain/domain": "workspace:*",
     "@company-brain/plugin-sdk": "workspace:*",
     "pg": "^8.16.3"

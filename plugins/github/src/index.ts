@@ -1,10 +1,17 @@
+import { PluginRequestError } from '@company-brain/plugin-sdk';
+
 import type {
   AccessExplanation,
   KnowledgeObject,
   KnowledgeObjectType,
   SearchRequest,
 } from '@company-brain/domain';
-import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
+import type {
+  KnowledgePlugin,
+  PluginContext,
+  PluginManifest,
+  SearchPluginContext,
+} from '@company-brain/plugin-sdk';
 
 const GITHUB_API = 'https://api.github.com';
 
@@ -64,7 +71,6 @@ export class GitHubPlugin implements KnowledgePlugin {
     id: 'github',
     displayName: 'GitHub',
     version: '0.1.0',
-    capabilities: ['search', 'get-object', 'explain-access'],
     credentialType: 'oauth-user-token',
     metadataStorage: 'non-sensitive-only',
   };
@@ -80,19 +86,21 @@ export class GitHubPlugin implements KnowledgePlugin {
     };
   }
 
-  async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
-    const limit = Math.max(1, Math.min(50, search.limit ?? 20));
+  async search(
+    search: SearchRequest,
+    context: SearchPluginContext,
+  ): Promise<readonly KnowledgeObject[]> {
+    const limit = Math.max(1, Math.min(50, context.resultLimit));
     const perType = Math.max(1, Math.ceil(limit / 2));
-    const [code, issues] = await Promise.all([
-      this.call<SearchResponse<CodeItem>>(
-        `/search/code?q=${encodeURIComponent(search.query)}&per_page=${perType}`,
-        context,
-      ),
-      this.call<SearchResponse<IssueItem>>(
+    const [codeRaw, issuesRaw] = await Promise.all([
+      this.call(`/search/code?q=${encodeURIComponent(search.query)}&per_page=${perType}`, context),
+      this.call(
         `/search/issues?q=${encodeURIComponent(search.query)}&per_page=${perType}`,
         context,
       ),
     ]);
+    const code = asSearchResponse<CodeItem>(codeRaw);
+    const issues = asSearchResponse<IssueItem>(issuesRaw);
     return [
       ...code.items.map((item) => codeToKnowledgeObject(item)),
       ...issues.items.map((item) => issueToKnowledgeObject(item)),
@@ -102,20 +110,22 @@ export class GitHubPlugin implements KnowledgePlugin {
   async getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined> {
     const id = parseObjectId(objectId);
     if (id.kind === 'code') {
-      const content = await this.call<ContentResponse>(
+      const raw = await this.call(
         `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/contents/${encodePath(id.path)}`,
         context,
       );
-      return contentToKnowledgeObject(id, content);
+      if (raw === undefined) return undefined;
+      return contentToKnowledgeObject(id, asContentResponse(raw));
     }
-    const issue = await this.call<IssueItem>(
+    const raw = await this.call(
       `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/issues/${id.number}`,
       context,
     );
-    return issueToKnowledgeObject(issue, id);
+    if (raw === undefined) return undefined;
+    return issueToKnowledgeObject(asIssueItem(raw), id);
   }
 
-  private async call<T>(path: string, context: PluginContext): Promise<T> {
+  private async call(path: string, context: PluginContext): Promise<unknown> {
     const response = await this.request(`${GITHUB_API}${path}`, {
       headers: {
         accept: 'application/vnd.github.text-match+json, application/vnd.github+json',
@@ -123,11 +133,65 @@ export class GitHubPlugin implements KnowledgePlugin {
         'user-agent': 'CompanyBrain/0.1',
         'x-github-api-version': '2026-03-10',
       },
-      signal: context.signal,
     });
-    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
-    return (await response.json()) as T;
+    if (response.status === 404) return undefined;
+    if (!response.ok) {
+      if (isGitHubRateLimited(response)) {
+        throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'rate-limited');
+      }
+      if (response.status === 401 || response.status === 403) {
+        throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'forbidden');
+      }
+      throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'unavailable');
+    }
+    return response.json();
   }
+}
+
+function isGitHubRateLimited(response: Response): boolean {
+  if (response.status === 429) return true;
+  if (response.status !== 403) return false;
+  return (
+    response.headers.get('x-ratelimit-remaining') === '0' ||
+    response.headers.get('retry-after') !== null
+  );
+}
+
+function asSearchResponse<T>(value: unknown): SearchResponse<T> {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('items' in value) ||
+    !Array.isArray(value.items)
+  ) {
+    throw new PluginRequestError('GitHub search response is missing items', 'unavailable');
+  }
+  return value as SearchResponse<T>;
+}
+
+function asContentResponse(value: unknown): ContentResponse {
+  if (typeof value !== 'object' || value === null) {
+    throw new PluginRequestError('GitHub content response is invalid', 'unavailable');
+  }
+  return value;
+}
+
+function asIssueItem(value: unknown): IssueItem {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('number' in value) ||
+    typeof value.number !== 'number' ||
+    !('title' in value) ||
+    typeof value.title !== 'string' ||
+    !('html_url' in value) ||
+    typeof value.html_url !== 'string' ||
+    !('repository_url' in value) ||
+    typeof value.repository_url !== 'string'
+  ) {
+    throw new PluginRequestError('GitHub issue response is invalid', 'unavailable');
+  }
+  return value as IssueItem;
 }
 
 function codeToKnowledgeObject(item: CodeItem): KnowledgeObject {
@@ -137,7 +201,7 @@ function codeToKnowledgeObject(item: CodeItem): KnowledgeObject {
     id,
     type: 'file',
     title: `${item.repository.full_name}/${item.path}`,
-    excerpt: item.text_matches?.[0]?.fragment ?? item.path,
+    excerpt: truncate(item.text_matches?.[0]?.fragment ?? item.path),
     url: item.html_url,
     metadata: { repository: item.repository.full_name, path: item.path },
   });
@@ -218,7 +282,7 @@ function parseObjectId(objectId: string): GitHubObjectId {
   } catch {
     // Converted to a stable connector error below.
   }
-  throw new Error('Invalid GitHub object ID');
+  throw new PluginRequestError('Invalid GitHub object ID', 'invalid-request');
 }
 
 function isCodeId(value: unknown): value is Extract<GitHubObjectId, { kind: 'code' }> {
@@ -244,14 +308,17 @@ function isBaseId(value: unknown, kind: string): value is Record<string, unknown
 
 function splitRepository(fullName: string): [string, string] {
   const parts = fullName.split('/');
-  if (parts.length !== 2 || !parts[0] || !parts[1])
-    throw new Error('GitHub returned an invalid repository name');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new PluginRequestError('GitHub returned an invalid repository name', 'unavailable');
+  }
   return [parts[0], parts[1]];
 }
 
 function splitRepositoryUrl(url: string): [string, string] {
   const match = /\/repos\/([^/]+)\/([^/]+)$/.exec(url);
-  if (!match?.[1] || !match[2]) throw new Error('GitHub returned an invalid repository URL');
+  if (!match?.[1] || !match[2]) {
+    throw new PluginRequestError('GitHub returned an invalid repository URL', 'unavailable');
+  }
   return [match[1], match[2]];
 }
 
@@ -260,7 +327,11 @@ function encodePath(path: string): string {
 }
 
 function decodeContent(content: string): string {
-  return Buffer.from(content.replace(/\s/g, ''), 'base64').toString('utf8');
+  const compact = content.replace(/\s/g, '');
+  // Decode only enough base64 for a ~2k character UTF-8 excerpt (worst-case 4 bytes/char).
+  const maxBase64Chars = Math.ceil((2_000 * 4 * 4) / 3) + 4;
+  const sliced = compact.length <= maxBase64Chars ? compact : compact.slice(0, maxBase64Chars);
+  return truncate(Buffer.from(sliced, 'base64').toString('utf8'));
 }
 
 function truncate(value: string): string {

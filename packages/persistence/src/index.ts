@@ -1,10 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
+import { credentialVaultKey, type CredentialVault } from '@company-brain/plugin-sdk';
 import { Pool, type PoolConfig } from 'pg';
 
-import type { AuditEvent, AuditSink } from '@company-brain/application';
-import type { UserIdentity } from '@company-brain/domain';
-import type { CredentialVault } from '@company-brain/plugin-sdk';
+import type { AuditEvent, AuditSink, UserIdentity } from '@company-brain/domain';
 
 export interface SessionStore {
   get(id: string): Promise<UserIdentity | undefined>;
@@ -70,15 +69,18 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
 
   take(state: string, flow: string): Promise<Readonly<Record<string, string>> | undefined> {
     const stored = this.#states.get(state);
-    this.#states.delete(state);
-    if (!stored || stored.flow !== flow || stored.expiresAt.getTime() <= Date.now()) {
+    if (!stored) return Promise.resolve(undefined);
+    if (stored.expiresAt.getTime() <= Date.now()) {
+      this.#states.delete(state);
       return Promise.resolve(undefined);
     }
+    if (stored.flow !== flow) return Promise.resolve(undefined);
+    this.#states.delete(state);
     return Promise.resolve(stored.payload);
   }
 }
 
-export interface DurableStore extends CredentialVault, AuditSink {
+interface DurableStore extends CredentialVault, AuditSink {
   initialize(): Promise<void>;
   close(): Promise<void>;
   getSessionAdapter(): SessionStore;
@@ -117,11 +119,17 @@ export class PostgresStore implements DurableStore {
       [subject, sourceId],
     );
     const row = result.rows[0];
-    return row ? decrypt(row, this.encryptionKey, `${subject}:${sourceId}`) : undefined;
+    return row
+      ? decrypt(row, this.encryptionKey, credentialVaultKey(subject, sourceId))
+      : undefined;
   }
 
   async put(subject: string, sourceId: string, accessToken: string): Promise<void> {
-    const encrypted = encrypt(accessToken, this.encryptionKey, `${subject}:${sourceId}`);
+    const encrypted = encrypt(
+      accessToken,
+      this.encryptionKey,
+      credentialVaultKey(subject, sourceId),
+    );
     await this.pool.query(
       `INSERT INTO company_brain_credentials (subject, source_id, ciphertext, nonce, auth_tag)
        VALUES ($1, $2, $3, $4, $5)

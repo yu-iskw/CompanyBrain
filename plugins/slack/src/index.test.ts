@@ -27,7 +27,12 @@ describe('SlackPlugin', () => {
 
     const results = await plugin.search(
       { query: 'design' },
-      { identity: { subject: 'user-1' }, accessToken: 'xoxp-secret', requestId: 'request-1' },
+      {
+        identity: { subject: 'user-1' },
+        accessToken: 'xoxp-secret',
+        requestId: 'request-1',
+        resultLimit: 20,
+      },
     );
 
     expect(results).toHaveLength(1);
@@ -52,7 +57,12 @@ describe('SlackPlugin', () => {
     await expect(
       plugin.search(
         { query: 'design' },
-        { identity: { subject: 'user-1' }, accessToken: 'token', requestId: 'request-1' },
+        {
+          identity: { subject: 'user-1' },
+          accessToken: 'token',
+          requestId: 'request-1',
+          resultLimit: 20,
+        },
       ),
     ).rejects.toThrow('missing_scope');
   });
@@ -74,7 +84,12 @@ describe('SlackPlugin', () => {
         ),
       );
     const plugin = new SlackPlugin(request);
-    const context = { identity: { subject: 'user' }, accessToken: 'token', requestId: 'request' };
+    const context = {
+      identity: { subject: 'user' },
+      accessToken: 'token',
+      requestId: 'request',
+      resultLimit: 20,
+    };
     const result = (await plugin.search({ query: 'result' }, context))[0];
 
     const object = await plugin.getObject(result?.citation.objectId ?? '', context);
@@ -93,14 +108,22 @@ describe('SlackPlugin', () => {
     );
 
     await expect(
-      plugin.getObject(objectId, { identity: { subject: 'u' }, accessToken: 't', requestId: 'r' }),
+      plugin.getObject(objectId, {
+        identity: { subject: 'u' },
+        accessToken: 't',
+        requestId: 'r',
+      }),
     ).resolves.toBeUndefined();
   });
 
   it('rejects malformed object IDs and transport responses', async () => {
     const plugin = new SlackPlugin();
     await expect(
-      plugin.getObject('invalid', { identity: { subject: 'u' }, accessToken: 't', requestId: 'r' }),
+      plugin.getObject('invalid', {
+        identity: { subject: 'u' },
+        accessToken: 't',
+        requestId: 'r',
+      }),
     ).rejects.toThrow('Invalid Slack object ID');
 
     const httpFailure = new SlackPlugin(
@@ -109,7 +132,7 @@ describe('SlackPlugin', () => {
     await expect(
       httpFailure.search(
         { query: 'x' },
-        { identity: { subject: 'u' }, accessToken: 't', requestId: 'r' },
+        { identity: { subject: 'u' }, accessToken: 't', requestId: 'r', resultLimit: 20 },
       ),
     ).rejects.toThrow('Slack HTTP 503');
 
@@ -119,7 +142,7 @@ describe('SlackPlugin', () => {
     await expect(
       invalidPayload.search(
         { query: 'x' },
-        { identity: { subject: 'u' }, accessToken: 't', requestId: 'r' },
+        { identity: { subject: 'u' }, accessToken: 't', requestId: 'r', resultLimit: 20 },
       ),
     ).rejects.toThrow('invalid response');
   });

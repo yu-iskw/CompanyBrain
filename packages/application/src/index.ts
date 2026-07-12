@@ -1,28 +1,23 @@
+import { createHash } from 'node:crypto';
+
+import {
+  PluginRequestError,
+  type CredentialVault,
+  type KnowledgePlugin,
+} from '@company-brain/plugin-sdk';
+
 import type {
   AccessExplanation,
+  AuditEvent,
+  AuditSink,
   KnowledgeObject,
   SearchRequest,
   SearchResponse,
   SourceFailure,
   UserIdentity,
 } from '@company-brain/domain';
-import type { CredentialVault, KnowledgePlugin } from '@company-brain/plugin-sdk';
 
-export interface AuditEvent {
-  readonly id: string;
-  readonly timestamp: string;
-  readonly requestId: string;
-  readonly subject: string;
-  readonly action: 'search' | 'get-object';
-  readonly sourceIds: readonly string[];
-  readonly outcome: 'success' | 'partial' | 'failure';
-  readonly resultCount: number;
-  readonly queryFingerprint?: string;
-}
-
-export interface AuditSink {
-  append(event: AuditEvent): Promise<void>;
-}
+export type { AuditEvent, AuditSink } from '@company-brain/domain';
 
 export class ConsoleAuditSink implements AuditSink {
   append(event: AuditEvent): Promise<void> {
@@ -74,12 +69,16 @@ export class CompanyBrainService {
     requestId: string = crypto.randomUUID(),
   ): Promise<SearchResponse> {
     const plugins = this.selectPlugins(request.sourceIds);
+    const limit = normalizeLimit(request.limit);
+    const perPluginLimit = Math.max(1, Math.ceil(limit / Math.max(1, plugins.length)));
     const outcomes = await Promise.all(
-      plugins.map(async (plugin) => this.searchPlugin(plugin, request, identity, requestId)),
+      plugins.map(async (plugin) =>
+        this.searchPlugin(plugin, request, identity, requestId, perPluginLimit),
+      ),
     );
     const results = outcomes.flatMap((outcome) => outcome.results);
     const failures = outcomes.flatMap((outcome) => outcome.failures);
-    const limited = results.slice(0, normalizeLimit(request.limit));
+    const limited = results.slice(0, limit);
     await this.writeSearchAudit(request, identity, requestId, plugins, limited, failures);
     return {
       query: request.query,
@@ -98,18 +97,29 @@ export class CompanyBrainService {
     const plugin = this.registry.get(sourceId);
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
-    if (!token) throw new SourceNotLinkedError(sourceId);
-    const result = await plugin.getObject(objectId, { identity, accessToken: token, requestId });
-    await this.audit.append({
-      id: crypto.randomUUID(),
-      timestamp: new Date().toISOString(),
+    if (!token) {
+      await this.writeObjectAudit(identity, requestId, sourceId, 'failure', 0);
+      throw new SourceNotLinkedError(sourceId);
+    }
+    let result: KnowledgeObject | undefined;
+    try {
+      result = await plugin.getObject(objectId, {
+        identity,
+        accessToken: token,
+        requestId,
+      });
+    } catch (error: unknown) {
+      await this.writeObjectAudit(identity, requestId, sourceId, 'failure', 0);
+      if (error instanceof PluginRequestError) throw error;
+      throw new PluginRequestError('Source object fetch failed', 'unavailable');
+    }
+    await this.writeObjectAudit(
+      identity,
       requestId,
-      subject: identity.subject,
-      action: 'get-object',
-      sourceIds: [sourceId],
-      outcome: result ? 'success' : 'failure',
-      resultCount: result ? 1 : 0,
-    });
+      sourceId,
+      result ? 'success' : 'failure',
+      result ? 1 : 0,
+    );
     return result;
   }
 
@@ -127,6 +137,7 @@ export class CompanyBrainService {
     request: SearchRequest,
     identity: UserIdentity,
     requestId: string,
+    resultLimit: number,
   ): Promise<{ results: readonly KnowledgeObject[]; failures: readonly SourceFailure[] }> {
     const token = await this.credentials.get(identity.subject, plugin.manifest.id);
     if (!token) {
@@ -136,11 +147,35 @@ export class CompanyBrainService {
       };
     }
     try {
-      const results = await plugin.search(request, { identity, accessToken: token, requestId });
+      const results = await plugin.search(request, {
+        identity,
+        accessToken: token,
+        requestId,
+        resultLimit,
+      });
       return { results, failures: [] };
     } catch (error: unknown) {
       return { results: [], failures: [mapPluginError(plugin.manifest.id, error)] };
     }
+  }
+
+  private async writeObjectAudit(
+    identity: UserIdentity,
+    requestId: string,
+    sourceId: string,
+    outcome: AuditEvent['outcome'],
+    resultCount: number,
+  ): Promise<void> {
+    await this.audit.append({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      requestId,
+      subject: identity.subject,
+      action: 'get-object',
+      sourceIds: [sourceId],
+      outcome,
+      resultCount,
+    });
   }
 
   private async writeSearchAudit(
@@ -151,7 +186,7 @@ export class CompanyBrainService {
     results: readonly KnowledgeObject[],
     failures: readonly SourceFailure[],
   ): Promise<void> {
-    const queryFingerprint = await fingerprint(request.query);
+    const queryFingerprint = fingerprint(request.query);
     await this.audit.append({
       id: crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -166,11 +201,22 @@ export class CompanyBrainService {
   }
 }
 
-export class UnknownSourceError extends Error {}
-export class SourceNotLinkedError extends Error {}
+export class UnknownSourceError extends Error {
+  constructor(readonly sourceId: string) {
+    super(`Unknown source: ${sourceId}`);
+    this.name = 'UnknownSourceError';
+  }
+}
+
+export class SourceNotLinkedError extends Error {
+  constructor(readonly sourceId: string) {
+    super(`Source account is not linked: ${sourceId}`);
+    this.name = 'SourceNotLinkedError';
+  }
+}
 
 function normalizeLimit(limit: number | undefined): number {
-  if (limit === undefined) return 20;
+  if (limit === undefined || !Number.isFinite(limit)) return 20;
   return Math.max(1, Math.min(100, Math.floor(limit)));
 }
 
@@ -179,15 +225,12 @@ function failure(sourceId: string, code: SourceFailure['code'], message: string)
 }
 
 function mapPluginError(sourceId: string, error: unknown): SourceFailure {
-  const message = error instanceof Error ? error.message : 'Source search failed';
-  if (/rate.?limit|429/i.test(message)) return failure(sourceId, 'rate-limited', message);
-  if (/forbidden|not_allowed|missing_scope|403/i.test(message))
-    return failure(sourceId, 'forbidden', message);
-  return failure(sourceId, 'unavailable', message);
+  if (error instanceof PluginRequestError) {
+    return failure(sourceId, error.code, error.message);
+  }
+  return failure(sourceId, 'unavailable', 'Source search failed');
 }
 
-async function fingerprint(value: string): Promise<string> {
-  const encoded = new TextEncoder().encode(value);
-  const digest = await crypto.subtle.digest('SHA-256', encoded);
-  return Buffer.from(digest).toString('hex');
+function fingerprint(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

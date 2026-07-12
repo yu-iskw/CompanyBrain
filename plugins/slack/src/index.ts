@@ -1,5 +1,12 @@
+import { PluginRequestError } from '@company-brain/plugin-sdk';
+
 import type { AccessExplanation, KnowledgeObject, SearchRequest } from '@company-brain/domain';
-import type { KnowledgePlugin, PluginContext, PluginManifest } from '@company-brain/plugin-sdk';
+import type {
+  KnowledgePlugin,
+  PluginContext,
+  PluginManifest,
+  SearchPluginContext,
+} from '@company-brain/plugin-sdk';
 
 const SLACK_API = 'https://slack.com/api';
 
@@ -26,19 +33,16 @@ interface SlackHistoryResponse {
   readonly messages?: readonly SlackMatch[];
 }
 
-export type SlackFetch = typeof fetch;
-
 export class SlackPlugin implements KnowledgePlugin {
   readonly manifest: PluginManifest = {
     id: 'slack',
     displayName: 'Slack',
     version: '0.1.0',
-    capabilities: ['search', 'get-object', 'explain-access'],
     credentialType: 'oauth-user-token',
     metadataStorage: 'non-sensitive-only',
   };
 
-  constructor(private readonly request: SlackFetch = fetch) {}
+  constructor(private readonly request: typeof fetch = fetch) {}
 
   explainAccess(): AccessExplanation {
     return {
@@ -56,14 +60,19 @@ export class SlackPlugin implements KnowledgePlugin {
     };
   }
 
-  async search(search: SearchRequest, context: PluginContext): Promise<readonly KnowledgeObject[]> {
-    const limit = Math.max(1, Math.min(100, search.limit ?? 20));
+  async search(
+    search: SearchRequest,
+    context: SearchPluginContext,
+  ): Promise<readonly KnowledgeObject[]> {
+    const limit = Math.max(1, Math.min(100, context.resultLimit));
     const response = await this.call<SlackSearchResponse>(
       'search.messages',
       new URLSearchParams({ query: search.query, count: String(limit), sort: 'score' }),
       context,
     );
-    return (response.messages?.matches ?? []).map((match) => toKnowledgeObject(match));
+    return (response.messages?.matches ?? [])
+      .slice(0, limit)
+      .map((match) => toKnowledgeObject(match));
   }
 
   async getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined> {
@@ -91,12 +100,28 @@ export class SlackPlugin implements KnowledgePlugin {
   ): Promise<T> {
     const response = await this.request(`${SLACK_API}/${method}?${parameters.toString()}`, {
       headers: { authorization: `Bearer ${context.accessToken}` },
-      signal: context.signal,
     });
-    if (!response.ok) throw new Error(`Slack HTTP ${response.status}`);
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new PluginRequestError(`Slack HTTP ${response.status}`, 'forbidden');
+      }
+      if (response.status === 429) throw new PluginRequestError(`Slack HTTP 429`, 'rate-limited');
+      throw new PluginRequestError(`Slack HTTP ${response.status}`, 'unavailable');
+    }
     const payload: unknown = await response.json();
-    if (!isSlackResponse(payload)) throw new Error('Slack returned an invalid response');
-    if (!payload.ok) throw new Error(`Slack API error: ${payload.error ?? 'unknown_error'}`);
+    if (!isSlackResponse(payload)) {
+      throw new PluginRequestError('Slack returned an invalid response', 'unavailable');
+    }
+    if (!payload.ok) {
+      const message = `Slack API error: ${payload.error ?? 'unknown_error'}`;
+      if (payload.error === 'missing_scope' || payload.error === 'not_allowed_token_type') {
+        throw new PluginRequestError(message, 'forbidden');
+      }
+      if (payload.error === 'ratelimited') {
+        throw new PluginRequestError(message, 'rate-limited');
+      }
+      throw new PluginRequestError(message, 'unavailable');
+    }
     return payload as T;
   }
 }
@@ -121,7 +146,7 @@ function toKnowledgeObject(match: SlackMatch): KnowledgeObject {
     sourceId: 'slack',
     type: 'slack-message',
     title,
-    excerpt: normalizeSlackText(match.text ?? ''),
+    excerpt: truncate(normalizeSlackText(match.text ?? '')),
     url,
     createdAt: slackTimestampToIso(timestamp),
     author: match.username ?? match.user_name,
@@ -143,6 +168,10 @@ function normalizeSlackText(text: string): string {
     .trim();
 }
 
+function truncate(value: string, max = 2_000): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
 function makeObjectId(channelId: string, timestamp: string): string {
   return Buffer.from(JSON.stringify({ channelId, timestamp }), 'utf8').toString('base64url');
 }
@@ -161,13 +190,13 @@ function parseObjectId(objectId: string): { channelId: string; timestamp: string
       return { channelId: value.channelId, timestamp: value.timestamp };
     }
   } catch {
-    // Converted to a stable domain error below.
+    // Converted to a stable PluginRequestError below.
   }
-  throw new Error('Invalid Slack object ID');
+  throw new PluginRequestError('Invalid Slack object ID', 'invalid-request');
 }
 
 function required(value: string | undefined, message: string): string {
-  if (!value) throw new Error(message);
+  if (!value) throw new PluginRequestError(message, 'unavailable');
   return value;
 }
 

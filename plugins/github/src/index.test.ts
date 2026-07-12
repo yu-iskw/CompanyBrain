@@ -6,6 +6,7 @@ const context = {
   identity: { subject: 'alice' },
   accessToken: 'github-token',
   requestId: 'request',
+  resultLimit: 20,
 };
 
 describe('GitHubPlugin', () => {
@@ -48,9 +49,9 @@ describe('GitHubPlugin', () => {
 
     expect(results).toHaveLength(2);
     expect(results.map((result) => result.type)).toEqual(['file', 'issue']);
-    expect(request.mock.calls[0]?.[1]).toMatchObject({
-      headers: expect.objectContaining({ authorization: 'Bearer github-token' }),
-    });
+    const init = request.mock.calls[0]?.[1];
+    const headers = new Headers(init?.headers);
+    expect(headers.get('authorization')).toBe('Bearer github-token');
   });
 
   it('resolves a file citation without accepting an arbitrary URL', async () => {
@@ -98,5 +99,15 @@ describe('GitHubPlugin', () => {
       vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 403 })),
     );
     await expect(plugin.search({ query: 'policy' }, context)).rejects.toThrow('GitHub HTTP 403');
+  });
+
+  it('returns undefined when a live GitHub object is missing', async () => {
+    const objectId = Buffer.from(
+      JSON.stringify({ kind: 'code', owner: 'acme', repository: 'brain', path: 'gone.ts' }),
+    ).toString('base64url');
+    const plugin = new GitHubPlugin(
+      vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 404 })),
+    );
+    await expect(plugin.getObject(objectId, context)).resolves.toBeUndefined();
   });
 });
