@@ -97,7 +97,10 @@ export class CompanyBrainService {
     const plugin = this.registry.get(sourceId);
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
-    if (!token) throw new SourceNotLinkedError(sourceId);
+    if (!token) {
+      await this.writeObjectAudit(identity, requestId, sourceId, 'failure', 0);
+      throw new SourceNotLinkedError(sourceId);
+    }
     let result: KnowledgeObject | undefined;
     try {
       result = await plugin.getObject(objectId, {

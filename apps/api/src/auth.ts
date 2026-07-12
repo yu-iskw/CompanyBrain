@@ -22,6 +22,7 @@ interface UserInfo {
 
 const LOGIN_STATE_COOKIE = 'company_brain_login_state';
 const SESSION_COOKIE = 'company_brain_session';
+const SESSION_TTL_MS = 8 * 60 * 60_000;
 
 export class Authenticator {
   constructor(
@@ -58,7 +59,7 @@ export class Authenticator {
     }).toString();
     response.setHeader(
       'set-cookie',
-      `${LOGIN_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${this.config.production ? '; Secure' : ''}`,
+      `${LOGIN_STATE_COOKIE}=${state}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${OAUTH_STATE_TTL_MS / 1000}${this.config.production ? '; Secure' : ''}`,
     );
     redirect(response, url.toString());
   }
@@ -86,7 +87,7 @@ export class Authenticator {
     );
     const identity = await fetchUserInfo(this.config.auth, accessToken);
     const sessionId = randomBytes(32).toString('base64url');
-    await this.sessions.put(sessionId, identity, new Date(Date.now() + 8 * 60 * 60_000));
+    await this.sessions.put(sessionId, identity, new Date(Date.now() + SESSION_TTL_MS));
     response.setHeader('set-cookie', [
       sessionCookie(sessionId, this.config.production),
       clearCookie(LOGIN_STATE_COOKIE, this.config.production),
@@ -153,7 +154,7 @@ async function exchangeOidcCode(
 }
 
 function sessionCookie(sessionId: string, production: boolean): string {
-  return `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${production ? '; Secure' : ''}`;
+  return `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${production ? '; Secure' : ''}`;
 }
 
 function clearCookie(name: string, production: boolean): string {

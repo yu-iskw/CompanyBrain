@@ -201,7 +201,7 @@ function codeToKnowledgeObject(item: CodeItem): KnowledgeObject {
     id,
     type: 'file',
     title: `${item.repository.full_name}/${item.path}`,
-    excerpt: item.text_matches?.[0]?.fragment ?? item.path,
+    excerpt: truncate(item.text_matches?.[0]?.fragment ?? item.path),
     url: item.html_url,
     metadata: { repository: item.repository.full_name, path: item.path },
   });

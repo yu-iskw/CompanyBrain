@@ -10,7 +10,7 @@ export class AuthenticationError extends Error {}
 export class UpstreamServiceError extends Error {}
 
 export function redirect(response: ServerResponse, location: string): void {
-  response.writeHead(302, { location });
+  response.writeHead(302, { location, 'cache-control': 'private, no-store' });
   response.end();
 }
 
