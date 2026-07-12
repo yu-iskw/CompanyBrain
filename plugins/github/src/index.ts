@@ -110,21 +110,19 @@ export class GitHubPlugin implements KnowledgePlugin {
   async getObject(objectId: string, context: PluginContext): Promise<KnowledgeObject | undefined> {
     const id = parseObjectId(objectId);
     if (id.kind === 'code') {
-      const content = asContentResponse(
-        await this.call(
-          `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/contents/${encodePath(id.path)}`,
-          context,
-        ),
-      );
-      return contentToKnowledgeObject(id, content);
-    }
-    const issue = asIssueItem(
-      await this.call(
-        `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/issues/${id.number}`,
+      const raw = await this.call(
+        `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/contents/${encodePath(id.path)}`,
         context,
-      ),
+      );
+      if (raw === undefined) return undefined;
+      return contentToKnowledgeObject(id, asContentResponse(raw));
+    }
+    const raw = await this.call(
+      `/repos/${encodeURIComponent(id.owner)}/${encodeURIComponent(id.repository)}/issues/${id.number}`,
+      context,
     );
-    return issueToKnowledgeObject(issue, id);
+    if (raw === undefined) return undefined;
+    return issueToKnowledgeObject(asIssueItem(raw), id);
   }
 
   private async call(path: string, context: PluginContext): Promise<unknown> {
@@ -136,12 +134,15 @@ export class GitHubPlugin implements KnowledgePlugin {
         'x-github-api-version': '2026-03-10',
       },
     });
+    if (response.status === 404) return undefined;
     if (!response.ok) {
       if (isGitHubRateLimited(response)) {
         throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'rate-limited');
       }
-      if (response.status === 403) throw new PluginRequestError(`GitHub HTTP 403`, 'forbidden');
-      throw new Error(`GitHub HTTP ${response.status}`);
+      if (response.status === 401 || response.status === 403) {
+        throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'forbidden');
+      }
+      throw new PluginRequestError(`GitHub HTTP ${response.status}`, 'unavailable');
     }
     return response.json();
   }

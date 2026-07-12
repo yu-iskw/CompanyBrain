@@ -104,10 +104,12 @@ export class SlackPlugin implements KnowledgePlugin {
     if (!response.ok) {
       if (response.status === 403) throw new PluginRequestError(`Slack HTTP 403`, 'forbidden');
       if (response.status === 429) throw new PluginRequestError(`Slack HTTP 429`, 'rate-limited');
-      throw new Error(`Slack HTTP ${response.status}`);
+      throw new PluginRequestError(`Slack HTTP ${response.status}`, 'unavailable');
     }
     const payload: unknown = await response.json();
-    if (!isSlackResponse(payload)) throw new Error('Slack returned an invalid response');
+    if (!isSlackResponse(payload)) {
+      throw new PluginRequestError('Slack returned an invalid response', 'unavailable');
+    }
     if (!payload.ok) {
       const message = `Slack API error: ${payload.error ?? 'unknown_error'}`;
       if (payload.error === 'missing_scope' || payload.error === 'not_allowed_token_type') {
@@ -116,7 +118,7 @@ export class SlackPlugin implements KnowledgePlugin {
       if (payload.error === 'ratelimited') {
         throw new PluginRequestError(message, 'rate-limited');
       }
-      throw new Error(message);
+      throw new PluginRequestError(message, 'unavailable');
     }
     return payload as T;
   }

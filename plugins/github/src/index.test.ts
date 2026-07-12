@@ -100,4 +100,14 @@ describe('GitHubPlugin', () => {
     );
     await expect(plugin.search({ query: 'policy' }, context)).rejects.toThrow('GitHub HTTP 403');
   });
+
+  it('returns undefined when a live GitHub object is missing', async () => {
+    const objectId = Buffer.from(
+      JSON.stringify({ kind: 'code', owner: 'acme', repository: 'brain', path: 'gone.ts' }),
+    ).toString('base64url');
+    const plugin = new GitHubPlugin(
+      vi.fn<typeof fetch>().mockResolvedValue(new Response('', { status: 404 })),
+    );
+    await expect(plugin.getObject(objectId, context)).resolves.toBeUndefined();
+  });
 });

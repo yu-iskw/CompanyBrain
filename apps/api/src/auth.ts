@@ -1,6 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 
-import { AuthenticationError, ClientFacingError, readAccessToken, redirect } from './http.js';
+import {
+  AuthenticationError,
+  ClientFacingError,
+  readAccessToken,
+  redirect,
+  UpstreamServiceError,
+} from './http.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -105,9 +111,14 @@ async function fetchUserInfo(config: OidcAuthConfig, accessToken: string): Promi
   const response = await fetch(config.userInfoUrl, {
     headers: { authorization: `Bearer ${accessToken}` },
   });
-  if (!response.ok) throw new AuthenticationError('OIDC userinfo rejected the access token');
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new AuthenticationError('OIDC userinfo rejected the access token');
+    }
+    throw new UpstreamServiceError('OIDC userinfo request failed');
+  }
   const value: unknown = await response.json();
-  if (!isUserInfo(value)) throw new AuthenticationError('OIDC userinfo response is missing sub');
+  if (!isUserInfo(value)) throw new UpstreamServiceError('OIDC userinfo response is missing sub');
   return { subject: value.sub, email: value.email, displayName: value.name };
 }
 
