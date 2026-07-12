@@ -2,14 +2,25 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    projects: ['packages/*/vitest.config.ts'],
+    include: ['__root-project-has-no-tests__/**/*.test.ts'],
+    projects: [
+      'apps/*/vitest.config.ts',
+      'packages/*/vitest.config.ts',
+      'plugins/*/vitest.config.ts',
+    ],
     coverage: {
       provider: 'v8',
-      include: ['packages/*/src/**/*.ts'],
+      include: [
+        'packages/application/src/**/*.ts',
+        'packages/persistence/src/**/*.ts',
+        'packages/plugin-sdk/src/**/*.ts',
+        'plugins/github/src/**/*.ts',
+        'plugins/slack/src/**/*.ts',
+      ],
       exclude: [
-        'packages/*/src/**/*.{test,spec}.ts',
-        'packages/*/src/**/*.d.ts',
-        'packages/*/dist/**',
+        '{apps,packages,plugins}/*/src/**/*.{test,spec}.ts',
+        '{apps,packages,plugins}/*/src/**/*.d.ts',
+        '{apps,packages,plugins}/*/dist/**',
         '**/*.config.{js,mjs,cjs,ts}',
       ],
       reporter: ['text', 'html', 'lcov', 'json-summary'],

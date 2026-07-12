@@ -1,0 +1,44 @@
+import {
+  CompanyBrainService,
+  ConsoleAuditSink,
+  PluginRegistry,
+  type AuditSink,
+} from '@company-brain/application';
+import { GitHubPlugin } from '@company-brain/plugin-github';
+import { InMemoryCredentialVault, type CredentialVault } from '@company-brain/plugin-sdk';
+import { SlackPlugin } from '@company-brain/plugin-slack';
+
+export interface CompanyBrainRuntime {
+  readonly service: CompanyBrainService;
+  readonly credentials: CredentialVault;
+}
+
+export function createRuntime(
+  options: { readonly credentials?: CredentialVault; readonly audit?: AuditSink } = {},
+): CompanyBrainRuntime {
+  const credentials = options.credentials ?? new InMemoryCredentialVault();
+  const registry = new PluginRegistry();
+  registry.register(new SlackPlugin());
+  registry.register(new GitHubPlugin());
+  return {
+    service: new CompanyBrainService(
+      registry,
+      credentials,
+      options.audit ?? new ConsoleAuditSink(),
+    ),
+    credentials,
+  };
+}
+
+export async function seedEnvCredentials(
+  credentials: CredentialVault,
+  subject: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  if (environment.SLACK_USER_TOKEN) {
+    await credentials.put(subject, 'slack', environment.SLACK_USER_TOKEN);
+  }
+  if (environment.GITHUB_USER_TOKEN) {
+    await credentials.put(subject, 'github', environment.GITHUB_USER_TOKEN);
+  }
+}

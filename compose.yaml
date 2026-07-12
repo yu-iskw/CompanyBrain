@@ -1,0 +1,42 @@
+services:
+  company-brain:
+    build: .
+    ports:
+      - 3000:3000
+    environment:
+      AUTH_MODE: local
+      BASE_URL: http://localhost:3000
+      LOCAL_USER_SUBJECT: local-developer
+      NODE_ENV: development
+      PORT: 3000
+      SLACK_CLIENT_ID: ${SLACK_CLIENT_ID:-}
+      SLACK_CLIENT_SECRET: ${SLACK_CLIENT_SECRET:-}
+      SLACK_USER_TOKEN: ${SLACK_USER_TOKEN:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      GITHUB_USER_TOKEN: ${GITHUB_USER_TOKEN:-}
+      DATABASE_URL: postgresql://company_brain:company_brain@postgres:5432/company_brain
+      CREDENTIAL_ENCRYPTION_KEY: ${CREDENTIAL_ENCRYPTION_KEY:?set CREDENTIAL_ENCRYPTION_KEY to a base64-encoded 32-byte key}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: company_brain
+      POSTGRES_PASSWORD: company_brain
+      POSTGRES_USER: company_brain
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U company_brain]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - company-brain-postgres:/var/lib/postgresql/data
+
+volumes:
+  company-brain-postgres:
