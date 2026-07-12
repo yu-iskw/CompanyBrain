@@ -1,9 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
+import { credentialVaultKey, type CredentialVault } from '@company-brain/plugin-sdk';
 import { Pool, type PoolConfig } from 'pg';
 
 import type { AuditEvent, AuditSink, UserIdentity } from '@company-brain/domain';
-import type { CredentialVault } from '@company-brain/plugin-sdk';
 
 export interface SessionStore {
   get(id: string): Promise<UserIdentity | undefined>;
@@ -80,7 +80,7 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
   }
 }
 
-export interface DurableStore extends CredentialVault, AuditSink {
+interface DurableStore extends CredentialVault, AuditSink {
   initialize(): Promise<void>;
   close(): Promise<void>;
   getSessionAdapter(): SessionStore;
@@ -119,11 +119,17 @@ export class PostgresStore implements DurableStore {
       [subject, sourceId],
     );
     const row = result.rows[0];
-    return row ? decrypt(row, this.encryptionKey, `${subject}:${sourceId}`) : undefined;
+    return row
+      ? decrypt(row, this.encryptionKey, credentialVaultKey(subject, sourceId))
+      : undefined;
   }
 
   async put(subject: string, sourceId: string, accessToken: string): Promise<void> {
-    const encrypted = encrypt(accessToken, this.encryptionKey, `${subject}:${sourceId}`);
+    const encrypted = encrypt(
+      accessToken,
+      this.encryptionKey,
+      credentialVaultKey(subject, sourceId),
+    );
     await this.pool.query(
       `INSERT INTO company_brain_credentials (subject, source_id, ciphertext, nonce, auth_tag)
        VALUES ($1, $2, $3, $4, $5)

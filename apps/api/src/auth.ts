@@ -7,6 +7,7 @@ import {
   redirect,
   UpstreamServiceError,
 } from './http.js';
+import { OAUTH_STATE_TTL_MS } from './oauth-helpers.js';
 
 import type { AppConfig, OidcAuthConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
@@ -20,6 +21,7 @@ interface UserInfo {
 }
 
 const LOGIN_STATE_COOKIE = 'company_brain_login_state';
+const SESSION_COOKIE = 'company_brain_session';
 
 export class Authenticator {
   constructor(
@@ -32,7 +34,7 @@ export class Authenticator {
     if (this.config.auth.mode === 'local') return { subject: this.config.auth.subject };
     const bearer = readBearer(request.headers.authorization);
     if (bearer) return fetchUserInfo(this.config.auth, bearer);
-    const sessionId = readCookies(request.headers.cookie).get('company_brain_session');
+    const sessionId = readCookies(request.headers.cookie).get(SESSION_COOKIE);
     if (!sessionId) return undefined;
     return this.sessions.get(sessionId);
   }
@@ -43,7 +45,7 @@ export class Authenticator {
     }
     const state = randomBytes(24).toString('base64url');
     const verifier = randomBytes(48).toString('base64url');
-    await this.states.put(state, 'oidc', { verifier }, new Date(Date.now() + 10 * 60_000));
+    await this.states.put(state, 'oidc', { verifier }, new Date(Date.now() + OAUTH_STATE_TTL_MS));
     const url = new URL(this.config.auth.authorizationUrl);
     url.search = new URLSearchParams({
       response_type: 'code',
@@ -151,7 +153,7 @@ async function exchangeOidcCode(
 }
 
 function sessionCookie(sessionId: string, production: boolean): string {
-  return `company_brain_session=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${production ? '; Secure' : ''}`;
+  return `${SESSION_COOKIE}=${sessionId}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${production ? '; Secure' : ''}`;
 }
 
 function clearCookie(name: string, production: boolean): string {

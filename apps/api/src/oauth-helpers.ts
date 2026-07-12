@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import { ClientFacingError, readAccessToken, redirect, UpstreamServiceError } from './http.js';
 
+export const OAUTH_STATE_TTL_MS = 10 * 60_000;
+
 import type { OAuthClientConfig } from './config.js';
 import type { UserIdentity } from '@company-brain/domain';
 import type { OAuthStateStore } from '@company-brain/persistence';
@@ -24,7 +26,7 @@ class LinkedOAuth {
       state,
       this.sourceId,
       { subject: identity.subject },
-      new Date(Date.now() + 10 * 60_000),
+      new Date(Date.now() + OAUTH_STATE_TTL_MS),
     );
     const authorizeUrl = this.buildAuthorizeUrl(this.config);
     authorizeUrl.searchParams.set('state', state);

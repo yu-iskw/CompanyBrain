@@ -164,14 +164,14 @@ function asSearchResponse<T>(value: unknown): SearchResponse<T> {
     !('items' in value) ||
     !Array.isArray(value.items)
   ) {
-    throw new Error('GitHub search response is missing items');
+    throw new PluginRequestError('GitHub search response is missing items', 'unavailable');
   }
   return value as SearchResponse<T>;
 }
 
 function asContentResponse(value: unknown): ContentResponse {
   if (typeof value !== 'object' || value === null) {
-    throw new Error('GitHub content response is invalid');
+    throw new PluginRequestError('GitHub content response is invalid', 'unavailable');
   }
   return value;
 }
@@ -189,7 +189,7 @@ function asIssueItem(value: unknown): IssueItem {
     !('repository_url' in value) ||
     typeof value.repository_url !== 'string'
   ) {
-    throw new Error('GitHub issue response is invalid');
+    throw new PluginRequestError('GitHub issue response is invalid', 'unavailable');
   }
   return value as IssueItem;
 }
@@ -308,14 +308,17 @@ function isBaseId(value: unknown, kind: string): value is Record<string, unknown
 
 function splitRepository(fullName: string): [string, string] {
   const parts = fullName.split('/');
-  if (parts.length !== 2 || !parts[0] || !parts[1])
-    throw new Error('GitHub returned an invalid repository name');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    throw new PluginRequestError('GitHub returned an invalid repository name', 'unavailable');
+  }
   return [parts[0], parts[1]];
 }
 
 function splitRepositoryUrl(url: string): [string, string] {
   const match = /\/repos\/([^/]+)\/([^/]+)$/.exec(url);
-  if (!match?.[1] || !match[2]) throw new Error('GitHub returned an invalid repository URL');
+  if (!match?.[1] || !match[2]) {
+    throw new PluginRequestError('GitHub returned an invalid repository URL', 'unavailable');
+  }
   return [match[1], match[2]];
 }
 

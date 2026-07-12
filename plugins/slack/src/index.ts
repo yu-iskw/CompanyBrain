@@ -102,7 +102,9 @@ export class SlackPlugin implements KnowledgePlugin {
       headers: { authorization: `Bearer ${context.accessToken}` },
     });
     if (!response.ok) {
-      if (response.status === 403) throw new PluginRequestError(`Slack HTTP 403`, 'forbidden');
+      if (response.status === 401 || response.status === 403) {
+        throw new PluginRequestError(`Slack HTTP ${response.status}`, 'forbidden');
+      }
       if (response.status === 429) throw new PluginRequestError(`Slack HTTP 429`, 'rate-limited');
       throw new PluginRequestError(`Slack HTTP ${response.status}`, 'unavailable');
     }
@@ -144,7 +146,7 @@ function toKnowledgeObject(match: SlackMatch): KnowledgeObject {
     sourceId: 'slack',
     type: 'slack-message',
     title,
-    excerpt: normalizeSlackText(match.text ?? ''),
+    excerpt: truncate(normalizeSlackText(match.text ?? '')),
     url,
     createdAt: slackTimestampToIso(timestamp),
     author: match.username ?? match.user_name,
@@ -166,6 +168,10 @@ function normalizeSlackText(text: string): string {
     .trim();
 }
 
+function truncate(value: string, max = 2_000): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
+}
+
 function makeObjectId(channelId: string, timestamp: string): string {
   return Buffer.from(JSON.stringify({ channelId, timestamp }), 'utf8').toString('base64url');
 }
@@ -184,13 +190,13 @@ function parseObjectId(objectId: string): { channelId: string; timestamp: string
       return { channelId: value.channelId, timestamp: value.timestamp };
     }
   } catch {
-    // Converted to a stable domain error below.
+    // Converted to a stable PluginRequestError below.
   }
   throw new PluginRequestError('Invalid Slack object ID', 'invalid-request');
 }
 
 function required(value: string | undefined, message: string): string {
-  if (!value) throw new Error(message);
+  if (!value) throw new PluginRequestError(message, 'unavailable');
   return value;
 }
 

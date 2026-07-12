@@ -98,37 +98,26 @@ export class CompanyBrainService {
     if (!plugin) throw new UnknownSourceError(sourceId);
     const token = await this.credentials.get(identity.subject, sourceId);
     if (!token) throw new SourceNotLinkedError(sourceId);
+    let result: KnowledgeObject | undefined;
     try {
-      const result = await plugin.getObject(objectId, {
+      result = await plugin.getObject(objectId, {
         identity,
         accessToken: token,
         requestId,
       });
-      await this.audit.append({
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        requestId,
-        subject: identity.subject,
-        action: 'get-object',
-        sourceIds: [sourceId],
-        outcome: result ? 'success' : 'failure',
-        resultCount: result ? 1 : 0,
-      });
-      return result;
     } catch (error: unknown) {
-      await this.audit.append({
-        id: crypto.randomUUID(),
-        timestamp: new Date().toISOString(),
-        requestId,
-        subject: identity.subject,
-        action: 'get-object',
-        sourceIds: [sourceId],
-        outcome: 'failure',
-        resultCount: 0,
-      });
+      await this.writeObjectAudit(identity, requestId, sourceId, 'failure', 0);
       if (error instanceof PluginRequestError) throw error;
       throw new PluginRequestError('Source object fetch failed', 'unavailable');
     }
+    await this.writeObjectAudit(
+      identity,
+      requestId,
+      sourceId,
+      result ? 'success' : 'failure',
+      result ? 1 : 0,
+    );
+    return result;
   }
 
   private selectPlugins(sourceIds?: readonly string[]): readonly KnowledgePlugin[] {
@@ -167,6 +156,25 @@ export class CompanyBrainService {
     }
   }
 
+  private async writeObjectAudit(
+    identity: UserIdentity,
+    requestId: string,
+    sourceId: string,
+    outcome: AuditEvent['outcome'],
+    resultCount: number,
+  ): Promise<void> {
+    await this.audit.append({
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      requestId,
+      subject: identity.subject,
+      action: 'get-object',
+      sourceIds: [sourceId],
+      outcome,
+      resultCount,
+    });
+  }
+
   private async writeSearchAudit(
     request: SearchRequest,
     identity: UserIdentity,
@@ -190,8 +198,19 @@ export class CompanyBrainService {
   }
 }
 
-export class UnknownSourceError extends Error {}
-export class SourceNotLinkedError extends Error {}
+export class UnknownSourceError extends Error {
+  constructor(readonly sourceId: string) {
+    super(`Unknown source: ${sourceId}`);
+    this.name = 'UnknownSourceError';
+  }
+}
+
+export class SourceNotLinkedError extends Error {
+  constructor(readonly sourceId: string) {
+    super(`Source account is not linked: ${sourceId}`);
+    this.name = 'SourceNotLinkedError';
+  }
+}
 
 function normalizeLimit(limit: number | undefined): number {
   if (limit === undefined || !Number.isFinite(limit)) return 20;

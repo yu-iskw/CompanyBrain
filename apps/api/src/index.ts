@@ -262,12 +262,18 @@ function requiredParameter(url: URL, name: string): string {
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
-  response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
+  response.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'private, no-store',
+  });
   response.end(JSON.stringify(value));
 }
 
 function html(response: ServerResponse, value: string): void {
-  response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+  response.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'private, no-store',
+  });
   response.end(value);
 }
 

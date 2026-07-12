@@ -50,20 +50,24 @@ export class PluginRequestError extends Error {
   }
 }
 
+export function credentialVaultKey(subject: string, sourceId: string): string {
+  return `${subject}:${sourceId}`;
+}
+
 export class InMemoryCredentialVault implements CredentialVault {
   readonly #tokens = new Map<string, string>();
 
   get(subject: string, sourceId: string): Promise<string | undefined> {
-    return Promise.resolve(this.#tokens.get(`${subject}:${sourceId}`));
+    return Promise.resolve(this.#tokens.get(credentialVaultKey(subject, sourceId)));
   }
 
   put(subject: string, sourceId: string, accessToken: string): Promise<void> {
-    this.#tokens.set(`${subject}:${sourceId}`, accessToken);
+    this.#tokens.set(credentialVaultKey(subject, sourceId), accessToken);
     return Promise.resolve();
   }
 
   delete(subject: string, sourceId: string): Promise<void> {
-    this.#tokens.delete(`${subject}:${sourceId}`);
+    this.#tokens.delete(credentialVaultKey(subject, sourceId));
     return Promise.resolve();
   }
 }
