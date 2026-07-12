@@ -116,6 +116,16 @@ export class CompanyBrainService {
       });
       return result;
     } catch (error: unknown) {
+      await this.audit.append({
+        id: crypto.randomUUID(),
+        timestamp: new Date().toISOString(),
+        requestId,
+        subject: identity.subject,
+        action: 'get-object',
+        sourceIds: [sourceId],
+        outcome: 'failure',
+        resultCount: 0,
+      });
       if (error instanceof PluginRequestError) throw error;
       throw new PluginRequestError('Source object fetch failed', 'unavailable');
     }
