@@ -61,7 +61,6 @@ jobs:
       - name: Run build
         run: pnpm build
       - name: Trunk Check
-        if: github.event_name != 'push'
         uses: trunk-io/trunk-action@v1
         with:
           setup-deps: true
